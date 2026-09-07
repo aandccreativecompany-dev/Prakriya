@@ -43,13 +43,24 @@ class _LockScreenState extends State<LockScreen> {
   final _pin = TextEditingController();
   final _confirm = TextEditingController();
   String? _error;
-  bool _triedBiometric = false;
+  // Guards against a double-trigger of the automatic open-screen attempt
+  // only (e.g. a stray extra frame) — NOT a "never try again" flag. It used
+  // to also gate the manual "Use biometric unlock" button, which made that
+  // button a permanent no-op after the first (often-cancelled) automatic
+  // attempt — see _authInProgress below for what actually prevents
+  // overlapping prompts on repeated manual taps.
+  bool _autoTried = false;
+  bool _authInProgress = false;
 
   @override
   void initState() {
     super.initState();
     if (widget.mode == LockMode.unlock && store.biometricEnabled) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _tryBiometric());
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_autoTried) return;
+        _autoTried = true;
+        _tryBiometric();
+      });
     }
   }
 
@@ -61,8 +72,13 @@ class _LockScreenState extends State<LockScreen> {
   }
 
   Future<void> _tryBiometric() async {
-    if (_triedBiometric) return;
-    _triedBiometric = true;
+    // Prevents a second `authenticate()` call while one is already showing
+    // its native prompt (double-tap, or the auto-attempt racing a manual
+    // tap) — local_auth doesn't like being called concurrently. Always
+    // cleared in `finally`, so a manual retry after a failed/cancelled
+    // attempt always gets through.
+    if (_authInProgress) return;
+    _authInProgress = true;
     final auth = LocalAuthentication();
     try {
       final canCheck = await auth.canCheckBiometrics || await auth.isDeviceSupported();
@@ -75,6 +91,8 @@ class _LockScreenState extends State<LockScreen> {
     } catch (_) {
       // Falls through to PIN entry — the device may not support biometrics,
       // or the app was built without the native activity biometrics needs.
+    } finally {
+      _authInProgress = false;
     }
   }
 

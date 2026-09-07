@@ -1164,6 +1164,11 @@ class AppState {
   /// version newer than this still shows a fresh banner.
   String? dismissedUpdateVersion;
 
+  /// Whether the Dashboard's "sign in to back up" banner has been dismissed.
+  /// Only remembered once the user actually dismisses it — signing in and
+  /// back out again shows it once more, since that's a fresh reason to sync.
+  bool signInBannerDismissed;
+
   /// Mindset & Growth tools: user-written reframe pairs (supplementing the
   /// built-in reference list), and per-day logs for the Stress Bucket and
   /// Daily DOSE checklists, keyed by `dayKey` date string.
@@ -1235,6 +1240,7 @@ class AppState {
     this.spendAlertMonthKey,
     this.spendAlertLevel = 0,
     this.dismissedUpdateVersion,
+    this.signInBannerDismissed = false,
     required this.customReframes,
     required this.stressBucketFills,
     required this.stressBucketEmpties,
@@ -1395,6 +1401,7 @@ class AppState {
         'spendAlertMonthKey': spendAlertMonthKey,
         'spendAlertLevel': spendAlertLevel,
         'dismissedUpdateVersion': dismissedUpdateVersion,
+        'signInBannerDismissed': signInBannerDismissed,
         'customReframes': customReframes.map((r) => r.toJson()).toList(),
         'stressBucketFills': stressBucketFills,
         'stressBucketEmpties': stressBucketEmpties,
@@ -1705,6 +1712,9 @@ class AppState {
     }
     if (json['dismissedUpdateVersion'] is String) {
       state.dismissedUpdateVersion = json['dismissedUpdateVersion'] as String;
+    }
+    if (json['signInBannerDismissed'] is bool) {
+      state.signInBannerDismissed = json['signInBannerDismissed'] as bool;
     }
     if (json['financeBudgetSavingsPct'] is num) {
       state.financeBudgetSavingsPct = (json['financeBudgetSavingsPct'] as num).toDouble();

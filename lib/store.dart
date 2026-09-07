@@ -50,6 +50,13 @@ class Store extends ChangeNotifier {
     await _commit();
   }
 
+  bool get signInBannerDismissed => _state.signInBannerDismissed;
+
+  Future<void> dismissSignInBanner() async {
+    _state.signInBannerDismissed = true;
+    await _commit();
+  }
+
   AppState get state => _state;
 
   List<Habit> get habits => _state.habits;
@@ -1387,6 +1394,67 @@ class Store extends ChangeNotifier {
       bestStreak: bestStreak,
     );
   }
+
+  // ---- Dashboard section performance (the "YOUR SECTIONS" tiles) ----
+
+  /// A tailored completion percentage (0-1, or null when the section has
+  /// nothing to measure yet) plus a short detail line, per
+  /// [kHomePageSections] key — what replaces the old plain nav-duplicate
+  /// tiles on the Dashboard. Each section uses whatever data it already
+  /// has that reads as "today's/this period's performance" rather than one
+  /// forced generic metric.
+  ({double? pct, String detail}) sectionPerformance(String key) {
+    switch (key) {
+      case 'productivity':
+        final today = todaysTasks;
+        final pct = today.isEmpty
+            ? null
+            : today.where((t) => t.done).length / today.length;
+        final streak = weeklyMomentum().bestStreak;
+        return (
+          pct: pct,
+          detail: streak > 0 ? '$streak-day streak' : 'No streak yet',
+        );
+
+      case 'outcome':
+        final wroteToday = _state.scripts.any((s) => _isToday(s.createdAt)) ||
+            _state.journalByDay.containsKey(dayKey(DateTime.now()));
+        final total = _state.scripts.length + _state.visionItems.length;
+        return (
+          pct: wroteToday ? 1.0 : 0.0,
+          detail: total == 0 ? 'Nothing yet' : '$total total entries',
+        );
+
+      case 'finance':
+        final income = _state.financeBudgetIncome;
+        final budget = income == null
+            ? null
+            : income * (financeBudgetNeedsPct + financeBudgetWantsPct) / 100;
+        final spent = spentThisMonth;
+        return (
+          pct: (budget == null || budget <= 0) ? null : (spent / budget).clamp(0.0, 1.0),
+          detail: '₹${spent.toStringAsFixed(0)} this month',
+        );
+
+      case 'health':
+        return _goalListPerformance(_state.healthGoals);
+      case 'mindset':
+        return _goalListPerformance(_state.mindsetGoals);
+      case 'relationships':
+        return _goalListPerformance(_state.relationshipsGoals);
+
+      default:
+        return (pct: null, detail: '');
+    }
+  }
+
+  ({double? pct, String detail}) _goalListPerformance(List<Task> goals) {
+    if (goals.isEmpty) return (pct: null, detail: 'No goals set');
+    final done = goals.where((g) => g.done).length;
+    return (pct: done / goals.length, detail: '$done/${goals.length} goals done');
+  }
+
+  bool _isToday(DateTime d) => dayKey(d) == dayKey(DateTime.now());
 
   // ---- Backup ----
 

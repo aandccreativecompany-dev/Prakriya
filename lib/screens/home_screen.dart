@@ -525,10 +525,19 @@ class _ItemHeader extends StatelessWidget {
         Icon(icon, color: Surfaces.accent(dark), size: 20),
         const SizedBox(width: 10),
         Expanded(
+          // flex:3 vs trailing's flex:2 below — without an explicit flex
+          // split, an unbounded trailing widget (e.g. a long reminder-times
+          // summary) can claim nearly all the Row's width and squeeze this
+          // Text down to a couple of pixels, which wraps it one letter per
+          // line instead of eliding it. maxLines/overflow here is a second,
+          // independent safety net for the same failure mode.
+          flex: 3,
           child: Text(title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: body(14, Surfaces.heading(dark), weight: FontWeight.w700)),
         ),
-        if (trailing != null) trailing!,
+        if (trailing != null) Flexible(flex: 2, child: trailing!),
       ],
     );
   }
@@ -2648,9 +2657,17 @@ class _ReminderItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
-    final on = store.reminders.where((ReminderSetting r) => r.enabled).toList();
-    final summary =
-        on.isEmpty ? 'Reminders are off' : on.map((r) => r.clockLabel).join(' · ');
+    // 'spendAlerts' has no fixed fire time (it's a live threshold check, not
+    // a scheduled reminder — see Notifications.scheduleAll) so its clockLabel
+    // is a meaningless "12:00 AM"; leave it out of this summary.
+    final on = store.reminders
+        .where((ReminderSetting r) => r.enabled && r.id != 'spendAlerts')
+        .toList();
+    final summary = on.isEmpty
+        ? 'Reminders are off'
+        : on.length <= 2
+            ? on.map((r) => r.clockLabel).join(' · ')
+            : '${on.length} reminders on';
 
     return InkWell(
       borderRadius: BorderRadius.circular(14),
@@ -2664,7 +2681,9 @@ class _ReminderItem extends StatelessWidget {
           children: [
             Flexible(
               child: Text(summary,
-                  overflow: TextOverflow.ellipsis, style: body(12, Surfaces.muted(dark))),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: body(12, Surfaces.muted(dark))),
             ),
             const SizedBox(width: 6),
             Icon(Icons.chevron_right, color: Surfaces.muted(dark), size: 18),

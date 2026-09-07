@@ -1,7 +1,9 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models.dart';
+import '../services/auth_service.dart';
 import '../store.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -72,6 +74,7 @@ class DashboardScreen extends StatelessWidget {
           child: Stack(
             children: [
               ListView(
+                key: const ValueKey('dashboardList'),
                 padding: const EdgeInsets.fromLTRB(18, 8, 18, 32),
                 children: [
                   Row(
@@ -98,6 +101,10 @@ class DashboardScreen extends StatelessWidget {
                   if (store.updateAvailable != null) ...[
                     const SizedBox(height: 14),
                     _UpdateBanner(dark: dark),
+                  ],
+                  if (!store.signInBannerDismissed) ...[
+                    const SizedBox(height: 14),
+                    _SignInBanner(dark: dark),
                   ],
                   const SizedBox(height: 90),
                   InkWell(
@@ -166,12 +173,13 @@ class DashboardScreen extends StatelessWidget {
                     physics: const NeverScrollableScrollPhysics(),
                     mainAxisSpacing: 10,
                     crossAxisSpacing: 10,
-                    childAspectRatio: 2.1,
+                    childAspectRatio: 1.7,
                     children: [
                       for (final section in sections)
                         _SectionTile(
                           title: section.title,
                           icon: _sectionIcon(section.key),
+                          performance: store.sectionPerformance(section.key),
                           dark: dark,
                           onTap: () => onOpenSection(section.key),
                         ),
@@ -267,6 +275,81 @@ class _UpdateBanner extends StatelessWidget {
   }
 }
 
+/// A dismissible nudge to sign in for cloud backup, shown while the user is
+/// both signed out and hasn't already dismissed it (see
+/// Store.signInBannerDismissed). Listens to Firebase's own auth stream
+/// directly — rather than relying on `store` — so it disappears the moment
+/// sign-in succeeds from Settings or onboarding, without needing auth state
+/// threaded into the store.
+class _SignInBanner extends StatefulWidget {
+  final bool dark;
+  const _SignInBanner({required this.dark});
+
+  @override
+  State<_SignInBanner> createState() => _SignInBannerState();
+}
+
+class _SignInBannerState extends State<_SignInBanner> {
+  bool _busy = false;
+
+  Future<void> _signIn() async {
+    setState(() => _busy = true);
+    final user = await AuthService.instance.signInWithGoogle();
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (user == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Couldn't sign in — try again.")));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<User?>(
+      stream: AuthService.instance.userChanges,
+      initialData: AuthService.instance.currentUser,
+      builder: (context, snapshot) {
+        if (snapshot.data != null) return const SizedBox.shrink();
+        final dark = widget.dark;
+        return ModuleCard(
+          accent: true,
+          padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.cloud_sync_outlined, color: Surfaces.accent(dark), size: 22),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Back up your data',
+                        style: body(13, Surfaces.accentText(dark), weight: FontWeight.w700)),
+                    const SizedBox(height: 3),
+                    Text('Sign in so nothing is lost if you switch phones.',
+                        style: body(11.5, Surfaces.accentText(dark).withValues(alpha: 0.8))),
+                    const SizedBox(height: 6),
+                    GestureDetector(
+                      onTap: _busy ? null : _signIn,
+                      child: Text(_busy ? 'Signing in…' : 'Sign in with Google',
+                          style: body(11.5, Surfaces.accent(dark), weight: FontWeight.w600)),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                onPressed: () => store.dismissSignInBanner(),
+                icon: Icon(Icons.close, size: 18, color: Surfaces.muted(dark)),
+                visualDensity: VisualDensity.compact,
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
 class _StatTile extends StatelessWidget {
   final String label;
   final String value;
@@ -302,20 +385,28 @@ class _StatTile extends StatelessWidget {
   }
 }
 
+/// A section tile showing that section's own live performance — a
+/// completion percentage (when the section has something to measure yet)
+/// plus a short detail line — instead of just repeating the section name
+/// as a second copy of the bottom-nav tab. See Store.sectionPerformance for
+/// what each section actually measures.
 class _SectionTile extends StatelessWidget {
   final String title;
   final IconData icon;
+  final ({double? pct, String detail}) performance;
   final bool dark;
   final VoidCallback onTap;
   const _SectionTile({
     required this.title,
     required this.icon,
+    required this.performance,
     required this.dark,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
+    final pct = performance.pct;
     return InkWell(
       borderRadius: BorderRadius.circular(16),
       onTap: onTap,
@@ -326,16 +417,41 @@ class _SectionTile extends StatelessWidget {
           border: Border.all(color: Surfaces.cardBorder(dark)),
           borderRadius: BorderRadius.circular(16),
         ),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(icon, size: 18, color: Surfaces.accent(dark)),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: body(12.5, Surfaces.heading(dark), weight: FontWeight.w700)),
+            Row(
+              children: [
+                Icon(icon, size: 18, color: Surfaces.accent(dark)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: body(12.5, Surfaces.heading(dark), weight: FontWeight.w700)),
+                ),
+                if (pct != null)
+                  Text('${(pct * 100).round()}%',
+                      style: body(11.5, Surfaces.accent(dark), weight: FontWeight.w800)),
+              ],
             ),
+            const Spacer(),
+            if (pct != null) ...[
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: pct.clamp(0.0, 1.0),
+                  minHeight: 5,
+                  backgroundColor: Surfaces.accent(dark).withValues(alpha: 0.12),
+                  color: Surfaces.accent(dark),
+                ),
+              ),
+              const SizedBox(height: 6),
+            ],
+            Text(performance.detail,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: body(10.5, Surfaces.muted(dark), weight: FontWeight.w500)),
           ],
         ),
       ),

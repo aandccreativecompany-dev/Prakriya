@@ -31,8 +31,23 @@ void main() {
     await tester.pumpWidget(const PrakriyaApp());
     await tester.pumpAndSettle();
 
+    // The Dashboard can also show a morning mood check-in prompt on top —
+    // dismiss it first so it doesn't intercept the scroll below.
+    final skipMood = find.text('Skip for today');
+    if (skipMood.evaluate().isNotEmpty) {
+      await tester.tap(skipMood);
+      await tester.pumpAndSettle();
+    }
+
     // Default landing tab is the Dashboard — one shared greeting/mantra/
-    // stats screen instead of every section repeating them.
+    // stats screen instead of every section repeating them. It now also
+    // shows a "back up your data" banner above the fold when signed out,
+    // which can push the sections list below the default test viewport, so
+    // this content may not be built/visible yet — scroll the Dashboard's own
+    // list down by a fixed amount first.
+    await tester.drag(
+        find.byKey(const ValueKey('dashboardList')), const Offset(0, -400));
+    await tester.pumpAndSettle();
     expect(find.text('YOUR SECTIONS'), findsOneWidget);
     expect(find.text('Productivity'), findsWidgets);
     // The bottom nav is now a horizontally scrolling row (so every visible

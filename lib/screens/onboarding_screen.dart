@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models.dart';
+import '../services/auth_service.dart';
 import '../store.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -31,7 +32,7 @@ const _timeOptions = [
   ('60', 'As much as it takes', "I'm building a real practice"),
 ];
 
-const _totalSteps = 6;
+const _totalSteps = 7;
 
 class _OnboardingScreenState extends State<OnboardingScreen> {
   final _pageController = PageController();
@@ -124,7 +125,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 onBack: _back,
                 onNext: _next,
               ),
-              _ModuleStep(onBack: _back, onDone: _next),
+              _ModuleStep(onBack: _back, onNext: _next),
+              _SignInStep(onBack: _back, onDone: _next),
             ],
           ),
         ),
@@ -150,7 +152,7 @@ class _StepHeader extends StatelessWidget {
           child: ClipRRect(
             borderRadius: BorderRadius.circular(2),
             child: LinearProgressIndicator(
-              value: step / 5,
+              value: step / _totalSteps,
               minHeight: 3,
               backgroundColor: Surfaces.muted(dark).withValues(alpha: 0.16),
               valueColor: AlwaysStoppedAnimation(Surfaces.accent(dark)),
@@ -158,7 +160,7 @@ class _StepHeader extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 12),
-        Text('$step/5',
+        Text('$step/$_totalSteps',
             style: body(11, Surfaces.muted(dark), weight: FontWeight.w700)),
       ],
     );
@@ -539,8 +541,8 @@ class _PickCard extends StatelessWidget {
 
 class _ModuleStep extends StatelessWidget {
   final VoidCallback onBack;
-  final VoidCallback onDone;
-  const _ModuleStep({required this.onBack, required this.onDone});
+  final VoidCallback onNext;
+  const _ModuleStep({required this.onBack, required this.onNext});
 
   @override
   Widget build(BuildContext context) {
@@ -558,7 +560,77 @@ class _ModuleStep extends StatelessWidget {
               style: body(12.5, Surfaces.muted(dark))),
           const SizedBox(height: 20),
           const Expanded(child: SingleChildScrollView(child: ModulePickerBody())),
-          GoldButton(labelText: 'Start using Prakriyā', onPressed: onDone),
+          GoldButton(labelText: 'Continue', onPressed: onNext),
+        ],
+      ),
+    );
+  }
+}
+
+/// Last onboarding step — a clear pitch for signing in, since that's the
+/// one thing that makes data survive a reinstall/new phone (see
+/// CloudSync). Deliberately still skippable: the app stays fully usable and
+/// fully local without an account, this step just makes sure everyone sees
+/// the option and what it buys them, once, up front, rather than only
+/// stumbling on a "Sign in" row buried in Settings.
+class _SignInStep extends StatefulWidget {
+  final VoidCallback onBack;
+  final VoidCallback onDone;
+  const _SignInStep({required this.onBack, required this.onDone});
+
+  @override
+  State<_SignInStep> createState() => _SignInStepState();
+}
+
+class _SignInStepState extends State<_SignInStep> {
+  bool _busy = false;
+
+  Future<void> _signIn() async {
+    setState(() => _busy = true);
+    final user = await AuthService.instance.signInWithGoogle();
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (user != null) {
+      widget.onDone();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Couldn't sign in — you can try again later in Settings.")));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _StepHeader(step: 6, onBack: widget.onBack),
+          const SizedBox(height: 22),
+          Icon(Icons.cloud_sync_outlined, color: Surfaces.accent(dark), size: 34),
+          const SizedBox(height: 16),
+          Text('Never lose this', style: display(23, Surfaces.heading(dark))),
+          const SizedBox(height: 8),
+          Text(
+            "Sign in and everything you enter — habits, priorities, journal, wallet — "
+            'backs up automatically to your account. Get a new phone, reinstall the app, '
+            "it's all still there. Fully optional: Prakriyā works completely offline without it.",
+            style: body(13, Surfaces.muted(dark)).copyWith(height: 1.5),
+          ),
+          const Spacer(),
+          GoldButton(
+            labelText: _busy ? 'Signing in…' : 'Sign in with Google',
+            onPressed: _busy ? () {} : () => _signIn(),
+          ),
+          const SizedBox(height: 12),
+          Center(
+            child: TextButton(
+              onPressed: _busy ? null : widget.onDone,
+              child: Text('Maybe later',
+                  style: body(13, Surfaces.muted(dark), weight: FontWeight.w600)),
+            ),
+          ),
         ],
       ),
     );

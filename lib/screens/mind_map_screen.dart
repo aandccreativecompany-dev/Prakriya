@@ -202,7 +202,7 @@ class _MindMapTab extends StatelessWidget {
       child: Column(
         children: [
           SizedBox(
-            height: 320,
+            height: 380,
             width: double.infinity,
             child: _MindMapRadial(
               centerLabel: centerLabel,
@@ -427,7 +427,14 @@ class _MindMapRadial extends StatelessWidget {
       builder: (context, constraints) {
         final size = Size(constraints.maxWidth, constraints.maxHeight);
         final center = Offset(size.width / 2, size.height / 2);
-        final radius = math.min(size.width, size.height) / 2 - 46;
+        // Branch nodes are 104 wide (52 half-width) — the old `- 46` inset
+        // left barely any margin past that half-width, so on a narrow phone
+        // the leftmost/rightmost nodes could clip against the screen edge.
+        // `- 68` guarantees at least a 16px margin, clamped so very small
+        // containers still get a legible, non-overlapping layout instead of
+        // a near-zero or negative radius collapsing every node onto the
+        // centre.
+        final radius = math.max(90.0, math.min(size.width, size.height) / 2 - 68);
         final positions = <Offset>[];
         for (var i = 0; i < branches.length; i++) {
           final angle = (-90 + (360 / branches.length) * i) * math.pi / 180;

@@ -7,9 +7,46 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:191375066674:android:98b37991c0b2ff9427de2b",
+        "mobilesdk_app_id": "1:191375066674:android:b58f2412f7580ac927de2b",
         "android_client_info": {
           "package_name": "ai.aandccreative.prakriya"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "191375066674-3drn1dfja3vt30ku3q859phanq4mcv90.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "ai.aandccreative.prakriya",
+            "certificate_hash": "91402a34773b95a74b821413196ced1a0b9e27be"
+          }
+        },
+        {
+          "client_id": "191375066674-nfovb3noep8q4e0kqanill93emno1r8f.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBvFkSBIQ-YX5tkxaDytOddQgzIvvOAUIs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "191375066674-nfovb3noep8q4e0kqanill93emno1r8f.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:191375066674:android:98b37991c0b2ff9427de2b",
+        "android_client_info": {
+          "package_name": "ai.aandccreative.ritualist"
         }
       },
       "oauth_client": [
@@ -17,7 +54,7 @@
           "client_id": "191375066674-4t2bfacd7d73paahij5vvtd4upsvdt7f.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
-            "package_name": "ai.aandccreative.prakriya",
+            "package_name": "ai.aandccreative.ritualist",
             "certificate_hash": "91402a34773b95a74b821413196ced1a0b9e27be"
           }
         },

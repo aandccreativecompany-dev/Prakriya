@@ -40,22 +40,21 @@ For the automated build, in Settings → Secrets and variables → Actions:
 | `KEY_PASSWORD` | key password |
 | `KEY_ALIAS` | `upload` |
 
-## App rename (Ritualist → Prakriyā): manual steps still required
+## App rename (Ritualist → Prakriyā)
 
-The code side of this rename (Dart package name, Android applicationId
+The rename (Dart package name, Android applicationId
 `ai.aandccreative.ritualist` → `ai.aandccreative.prakriya`, storage keys,
-notification channel, GitHub Releases check) is done. Three things outside
-the code still need a human with console access, before the next tagged
-release will actually work end to end:
+notification channel, GitHub Releases check, Firebase setup) is complete.
 
-1. **Firebase**: add a new Android app to the `prakriya-82d0e` Firebase
-   project with package name `ai.aandccreative.prakriya` and the upload
-   keystore's SHA-1/SHA-256 fingerprints (`keytool -list -v -keystore
-   prakriya-upload.jks`), then download the real `google-services.json` it
-   gives you and replace `android_overrides/google-services.json` with it.
-   The copy in this change only has the package name field edited by
-   hand — Google Sign-In and Firestore will not authenticate against it
-   until the real one from the console is in place.
+1. **Firebase**: done. A second Android app (`ai.aandccreative.prakriya`,
+   alongside the untouched original `ai.aandccreative.ritualist` entry) is
+   registered in the `prakriya-82d0e` Firebase project, with the upload
+   keystore's SHA-1 and SHA-256 fingerprints added, Google as an enabled
+   Auth sign-in provider, and a live Firestore database with rules matching
+   `firestore.rules`. `android_overrides/google-services.json` holds the
+   real config downloaded from the console. If the upload keystore is ever
+   rotated, the new fingerprints need adding to that same app card and a
+   fresh `google-services.json` pulled down.
 2. **GitHub repo name**: done — the repo is now
    `aandccreativecompany-dev/Prakriya`. `lib/services/update_checker.dart`'s
    `_repo` constant and the link below are already updated to match.
