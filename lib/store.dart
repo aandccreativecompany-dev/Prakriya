@@ -1174,6 +1174,70 @@ class Store extends ChangeNotifier {
     await _commit();
   }
 
+  // ---- Nutrition & Insights: lightweight quick-add meal log ----
+
+  List<NutritionEntry> get nutritionEntries => _state.nutritionEntries;
+
+  List<NutritionEntry> nutritionEntriesFor(DateTime day) {
+    final key = dayKey(day);
+    return _state.nutritionEntries.where((e) => dayKey(e.date) == key).toList()
+      ..sort((a, b) => b.date.compareTo(a.date));
+  }
+
+  List<NutritionEntry> get todaysNutritionEntries => nutritionEntriesFor(DateTime.now());
+
+  Future<void> addNutritionEntry(String mealType, String name, {String note = ''}) async {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return;
+    _state.nutritionEntries.insert(
+      0,
+      NutritionEntry(
+        id: '${DateTime.now().microsecondsSinceEpoch}',
+        mealType: kMealTypes.contains(mealType) ? mealType : 'snack',
+        name: trimmed,
+        note: note.trim(),
+        date: DateTime.now(),
+      ),
+    );
+    await _commit();
+  }
+
+  Future<void> removeNutritionEntry(NutritionEntry entry) async {
+    _state.nutritionEntries.remove(entry);
+    await _commit();
+  }
+
+  /// Whether at least one meal was logged on [day] — the unit the streak and
+  /// weekly insight below both count, in keeping with "notice the pattern"
+  /// rather than "hit a number".
+  bool loggedOn(DateTime day) => nutritionEntriesFor(day).isNotEmpty;
+
+  /// Consecutive days (counting back from today) with at least one meal
+  /// logged — same shape as [Habit.streak] so it reads consistently with the
+  /// rest of the app.
+  int get nutritionStreak {
+    var count = 0;
+    var cursor = DateTime.now();
+    while (loggedOn(cursor)) {
+      count++;
+      cursor = cursor.subtract(const Duration(days: 1));
+    }
+    return count;
+  }
+
+  /// Last 7 days (oldest first), each paired with whether a meal was logged
+  /// that day — powers the one weekly insight strip on the Nutrition card.
+  List<(DateTime day, bool logged)> get nutritionWeekOverview {
+    final today = DateTime.now();
+    return [
+      for (var i = 6; i >= 0; i--)
+        (
+          DateTime(today.year, today.month, today.day).subtract(Duration(days: i)),
+          loggedOn(DateTime(today.year, today.month, today.day).subtract(Duration(days: i))),
+        ),
+    ];
+  }
+
   // ---- Relationships & Connection: people to stay in touch with ----
 
   List<RelationshipContact> get relationshipContacts => _state.relationshipContacts;

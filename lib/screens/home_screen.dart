@@ -12,6 +12,7 @@ import 'habit_detail_screen.dart';
 import 'mind_map_screen.dart';
 import 'monthly_goals_screen.dart';
 import 'personal_care_screen.dart';
+import 'products_screen.dart';
 import 'reminders_screen.dart';
 import 'scripting_screen.dart';
 import 'spending_tracker_screen.dart';
@@ -43,6 +44,8 @@ String _sectionShortLabel(String key) {
       return 'Mindset';
     case 'relationships':
       return 'Connect';
+    case 'nutrition':
+      return 'Nutrition';
     default:
       return key;
   }
@@ -62,6 +65,8 @@ IconData _sectionIcon(String key) {
       return Icons.psychology_alt_outlined;
     case 'relationships':
       return Icons.diversity_1_outlined;
+    case 'nutrition':
+      return Icons.restaurant_outlined;
     default:
       return Icons.circle_outlined;
   }
@@ -132,6 +137,8 @@ class _HomeScreenState extends State<HomeScreen> {
         return const _MindsetGoalsContent();
       case 'relationshipsGoals':
         return const _RelationshipsGoalsContent();
+      case 'nutritionLog':
+        return const _NutritionContent();
       default:
         return const SizedBox.shrink();
     }
@@ -199,6 +206,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   if (visible.contains(id)) _itemFor(id),
               ],
             ),
+          // Products isn't a personal-tracking module (nothing here reads or
+          // writes AppState), so it isn't gated by the Settings module
+          // toggle like the sections above — it's always its own tab.
+          const ProductsScreen(embedded: true),
         ];
 
         final navItems = <_NavItem>[
@@ -206,6 +217,10 @@ class _HomeScreenState extends State<HomeScreen> {
               icon: Icons.home_outlined, selectedIcon: Icons.home, label: 'Dashboard'),
           for (final section in primarySections)
             _NavItem(icon: _sectionIcon(section.key), label: _sectionShortLabel(section.key)),
+          const _NavItem(
+              icon: Icons.shopping_bag_outlined,
+              selectedIcon: Icons.shopping_bag,
+              label: 'Products'),
         ];
 
         final safeIndex = _tabIndex.clamp(0, tabs.length - 1);
@@ -2340,6 +2355,302 @@ class _RelationshipsGoalsContentState extends State<_RelationshipsGoalsContent> 
           onRemove: store.removeRelationshipsGoal,
         ),
       ],
+    );
+  }
+}
+
+/// Nutrition & Insights — a deliberately lightweight quick-add meal log, not
+/// a calorie/macro counter (researched MyFitnessPal/Cronometer/Lose It!/Noom
+/// before building this: their common thread once you strip out the
+/// calorie-counting is "make logging fast, then show one clear insight" —
+/// so that's what this does). Logging a meal is a two-tap flow (pick a meal
+/// type, type what you ate), the one insight is a 7-day "did I log
+/// anything today" streak strip (reusing the same idea as the Habits
+/// streak), and it closes with a nudge into Evening reflection so eating
+/// patterns feed the same journaling the rest of the app already has.
+class _NutritionContent extends StatefulWidget {
+  const _NutritionContent();
+  @override
+  State<_NutritionContent> createState() => _NutritionContentState();
+}
+
+class _NutritionContentState extends State<_NutritionContent> {
+  Future<void> _quickAdd(String mealType) async {
+    final nameCtrl = TextEditingController();
+    final noteCtrl = TextEditingController();
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Log ${kMealTypeLabels[mealType]}',
+            style: display(17, Surfaces.heading(dark))),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: nameCtrl,
+              autofocus: true,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                isDense: true,
+                hintText: 'What did you eat?',
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: noteCtrl,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                isDense: true,
+                hintText: 'Optional note — e.g. how you felt after',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Save')),
+        ],
+      ),
+    );
+    if (result == true && nameCtrl.text.trim().isNotEmpty) {
+      await store.addNutritionEntry(mealType, nameCtrl.text, note: noteCtrl.text);
+      if (mounted) toastSaved(context);
+    }
+  }
+
+  Future<void> _remove(NutritionEntry entry) async {
+    await store.removeNutritionEntry(entry);
+    if (mounted) toastSaved(context, label: 'Removed');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final today = store.todaysNutritionEntries;
+    final streak = store.nutritionStreak;
+    final week = store.nutritionWeekOverview;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _ItemHeader(icon: Icons.restaurant_outlined, title: 'Nutrition & insights'),
+        const SizedBox(height: 4),
+        Text(
+          'A quick log, not a calorie counter — notice your patterns, not the numbers.',
+          style: body(11.5, Surfaces.muted(dark)),
+        ),
+        const SizedBox(height: 14),
+        Text('QUICK ADD', style: label(Surfaces.eyebrow(dark))),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final meal in kMealTypes)
+              _MealQuickAddChip(
+                mealType: meal,
+                dark: dark,
+                onTap: () => _quickAdd(meal),
+              ),
+          ],
+        ),
+        const SizedBox(height: 18),
+        Divider(height: 1, color: Surfaces.cardBorder(dark)),
+        const SizedBox(height: 18),
+
+        Row(
+          children: [
+            Expanded(child: Text('THIS WEEK', style: label(Surfaces.eyebrow(dark)))),
+            Text(
+              streak > 0 ? '🔥 $streak day streak' : 'Log today to start a streak',
+              style: body(11.5, Surfaces.accent(dark), weight: FontWeight.w700),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            for (final (day, logged) in week) ...[
+              Expanded(
+                child: Column(
+                  children: [
+                    Container(
+                      width: 22,
+                      height: 22,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: logged
+                            ? Surfaces.accent(dark)
+                            : Surfaces.accent(dark).withValues(alpha: 0.10),
+                        border: Border.all(
+                            color: Surfaces.accent(dark).withValues(alpha: logged ? 1 : 0.35)),
+                      ),
+                      child: logged
+                          ? const Icon(Icons.check, size: 13, color: Colors.white)
+                          : null,
+                    ),
+                    const SizedBox(height: 4),
+                    Text('MTWTFSS'[day.weekday - 1],
+                        style: body(9.5, Surfaces.muted(dark), weight: FontWeight.w700)),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+        const SizedBox(height: 18),
+        Divider(height: 1, color: Surfaces.cardBorder(dark)),
+        const SizedBox(height: 18),
+
+        Text('TODAY', style: label(Surfaces.eyebrow(dark))),
+        const SizedBox(height: 10),
+        if (today.isEmpty)
+          Text('Nothing logged yet today — tap a meal above to add one.',
+              style: body(13, Surfaces.muted(dark)))
+        else
+          for (final entry in today)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Dismissible(
+                key: ValueKey(entry.id),
+                direction: DismissDirection.endToStart,
+                background: Container(
+                  alignment: Alignment.centerRight,
+                  padding: const EdgeInsets.only(right: 16),
+                  decoration: BoxDecoration(
+                    color: Colors.redAccent.withValues(alpha: 0.85),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: const Icon(Icons.delete_outline, color: Colors.white, size: 18),
+                ),
+                onDismissed: (_) => _remove(entry),
+                child: _NutritionEntryTile(entry: entry, dark: dark),
+              ),
+            ),
+        const SizedBox(height: 18),
+        Divider(height: 1, color: Surfaces.cardBorder(dark)),
+        const SizedBox(height: 18),
+        InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: () => Navigator.of(context)
+              .push(MaterialPageRoute(builder: (_) => const EveningReflectionScreen())),
+          child: Row(
+            children: [
+              Icon(Icons.nights_stay_outlined, size: 18, color: Surfaces.accent(dark)),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text('Turn today\'s eating pattern into a one-line reflection',
+                    style: body(12.5, Surfaces.accent(dark), weight: FontWeight.w700)),
+              ),
+              Icon(Icons.chevron_right, size: 16, color: Surfaces.accent(dark)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _MealQuickAddChip extends StatelessWidget {
+  final String mealType;
+  final bool dark;
+  final VoidCallback onTap;
+  const _MealQuickAddChip({required this.mealType, required this.dark, required this.onTap});
+
+  IconData get _icon {
+    switch (mealType) {
+      case 'breakfast':
+        return Icons.wb_sunny_outlined;
+      case 'lunch':
+        return Icons.lunch_dining_outlined;
+      case 'dinner':
+        return Icons.dinner_dining_outlined;
+      default:
+        return Icons.cookie_outlined;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          color: Surfaces.accent(dark).withValues(alpha: 0.10),
+          border: Border.all(color: Surfaces.accent(dark).withValues(alpha: 0.3)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(_icon, size: 16, color: Surfaces.accent(dark)),
+            const SizedBox(width: 6),
+            Text(kMealTypeLabels[mealType] ?? mealType,
+                style: body(12.5, Surfaces.accent(dark), weight: FontWeight.w700)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _NutritionEntryTile extends StatelessWidget {
+  final NutritionEntry entry;
+  final bool dark;
+  const _NutritionEntryTile({required this.entry, required this.dark});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: Surfaces.accent(dark).withValues(alpha: 0.06),
+        border: Border.all(color: Surfaces.cardBorder(dark)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 30,
+            height: 30,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: Surfaces.accent(dark).withValues(alpha: 0.16),
+              shape: BoxShape.circle,
+            ),
+            child: Text(
+              (kMealTypeLabels[entry.mealType] ?? '?').substring(0, 1),
+              style: body(12, Surfaces.accent(dark), weight: FontWeight.w800),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(entry.name,
+                    style: body(13.5, Surfaces.heading(dark), weight: FontWeight.w700)),
+                Text(kMealTypeLabels[entry.mealType] ?? entry.mealType,
+                    style: body(11, Surfaces.muted(dark))),
+                if (entry.note.trim().isNotEmpty) ...[
+                  const SizedBox(height: 3),
+                  Text(entry.note, style: body(11.5, Surfaces.muted(dark))),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

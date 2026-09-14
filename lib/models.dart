@@ -387,6 +387,135 @@ class RelationshipContact {
   }
 }
 
+/// One quick-add meal note for the lightweight Nutrition & Insights tracker.
+/// Deliberately NOT a calorie/macro counter — see [kMealTypes] — the goal is
+/// noticing eating patterns and pairing them with the mindset journaling the
+/// rest of the app already does, not database-grade nutrition math.
+class NutritionEntry {
+  String id;
+  String mealType; // one of kMealTypes
+  String name;
+  String note;
+  DateTime date;
+
+  NutritionEntry({
+    required this.id,
+    required this.mealType,
+    required this.name,
+    this.note = '',
+    required this.date,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'mealType': mealType,
+        'name': name,
+        'note': note,
+        'date': date.toIso8601String(),
+      };
+
+  static NutritionEntry? fromJson(Map<String, dynamic> json) {
+    final name = json['name'];
+    if (name is! String || name.isEmpty) return null;
+    final id = json['id'];
+    final rawDate = json['date'];
+    final parsedDate = rawDate is String ? DateTime.tryParse(rawDate) : null;
+    final mealType = json['mealType'];
+    return NutritionEntry(
+      id: id is String && id.isNotEmpty
+          ? id
+          : '${DateTime.now().microsecondsSinceEpoch}',
+      mealType:
+          mealType is String && kMealTypes.contains(mealType) ? mealType : 'snack',
+      name: name,
+      note: json['note'] is String ? json['note'] as String : '',
+      date: parsedDate ?? DateTime.now(),
+    );
+  }
+}
+
+/// Quick-add meal categories — kept short with no calorie/macro fields per
+/// the "lightweight, non-overwhelming" design.
+const kMealTypes = ['breakfast', 'lunch', 'dinner', 'snack'];
+
+const kMealTypeLabels = {
+  'breakfast': 'Breakfast',
+  'lunch': 'Lunch',
+  'dinner': 'Dinner',
+  'snack': 'Snack',
+};
+
+const kMealTypeIcons = {
+  'breakfast': 'wb_sunny_outlined',
+  'lunch': 'lunch_dining_outlined',
+  'dinner': 'dinner_dining_outlined',
+  'snack': 'cookie_outlined',
+};
+
+/// One card in the in-app Products showcase — a static catalog, not user
+/// data, so nothing here is persisted in AppState. The free item links to
+/// the hosted PDF directly; paid items link out to the website's Products
+/// page (which itself will point to Gumroad/Payhip once checkout is live) —
+/// matching the website's own choice never to bundle a paid file somewhere
+/// it could be pulled out and shared for free.
+class DigitalProduct {
+  final String id;
+  final String title;
+  final String blurb;
+  final String priceLabel;
+  final bool isFree;
+  final String url;
+
+  const DigitalProduct({
+    required this.id,
+    required this.title,
+    required this.blurb,
+    required this.priceLabel,
+    required this.isFree,
+    required this.url,
+  });
+}
+
+const kDigitalProducts = [
+  DigitalProduct(
+    id: 'growth-challenge',
+    title: 'The 7-Day Growth Mindset Challenge',
+    blurb:
+        'A short, structured challenge to shift out of a fixed mindset — one focused prompt a day, for seven days.',
+    priceLabel: 'Free',
+    isFree: true,
+    url:
+        'https://aandccreativeventures.netlify.app/downloads/7-Day-Growth-Mindset-Challenge.pdf',
+  ),
+  DigitalProduct(
+    id: 'money-mindset',
+    title: 'Money Mindset — 60-Day Workbook',
+    blurb:
+        'A guided 60-day workbook for rebuilding your relationship with money, one page at a time.',
+    priceLabel: 'Coming soon',
+    isFree: false,
+    url: 'https://aandccreativeventures.netlify.app/products',
+  ),
+  DigitalProduct(
+    id: 'brain-rewiring-planner',
+    title: 'Brain Rewiring — Sept–Dec Planner',
+    blurb:
+        'A seasonal quarter-long planner for rewiring habits and focus, built around a defined date range.',
+    priceLabel: 'Coming soon',
+    isFree: false,
+    url: 'https://aandccreativeventures.netlify.app/products',
+  ),
+  DigitalProduct(
+    id: 'brain-rewiring-journal',
+    title: 'Brain Rewiring — 365-Day Journal',
+    blurb:
+        'Our flagship marker-style daily journal — a full year of guided prompts for rewiring thought patterns.',
+    priceLabel: 'Coming soon',
+    isFree: false,
+    url: 'https://aandccreativeventures.netlify.app/products',
+  ),
+];
+
 const kRelationTypes = ['family', 'friend', 'partner', 'colleague', 'mentor', 'other'];
 
 const kRelationTypeLabels = {
@@ -855,6 +984,7 @@ const kAllModuleIds = [
   'healthGoals',
   'mindsetGoals',
   'relationshipsGoals',
+  'nutritionLog',
 ];
 
 const kModuleTitles = {
@@ -871,6 +1001,7 @@ const kModuleTitles = {
   'healthGoals': 'Health & body',
   'mindsetGoals': 'Mindset & growth',
   'relationshipsGoals': 'Relationships & connection',
+  'nutritionLog': 'Nutrition & insights',
 };
 
 /// The five habits every fresh install starts with — still fully editable
@@ -969,6 +1100,7 @@ const kFinanceModuleIds = ['financeGoals'];
 const kHealthModuleIds = ['healthGoals'];
 const kMindsetModuleIds = ['mindsetGoals'];
 const kRelationshipsModuleIds = ['relationshipsGoals'];
+const kNutritionModuleIds = ['nutritionLog'];
 
 /// One swipeable section of the home screen — bundles its title and the
 /// module ids it holds so home_screen.dart's page-building and the
@@ -988,6 +1120,7 @@ const kHomePageSections = [
   HomePageSection('health', 'Health & body', kHealthModuleIds),
   HomePageSection('mindset', 'Mindset & growth', kMindsetModuleIds),
   HomePageSection('relationships', 'Relationships & connection', kRelationshipsModuleIds),
+  HomePageSection('nutrition', 'Nutrition & insights', kNutritionModuleIds),
 ];
 
 /// Onboarding presets — set by the quiz, changeable any time from settings.
@@ -1177,6 +1310,9 @@ class AppState {
   Map<String, List<String>> stressBucketEmpties;
   Map<String, List<String>> doseByDay;
 
+  /// Nutrition & Insights: quick-add meal log — see [NutritionEntry].
+  List<NutritionEntry> nutritionEntries;
+
   AppState({
     required this.tasksByDay,
     required this.habits,
@@ -1245,9 +1381,11 @@ class AppState {
     required this.stressBucketFills,
     required this.stressBucketEmpties,
     required this.doseByDay,
+    List<NutritionEntry>? nutritionEntries,
   })  : mindMapStickyNotes = mindMapStickyNotes ?? <String, List<MindMapStickyNote>>{},
         spendCategories = spendCategories ?? defaultSpendCategories(),
-        mantraShuffleOrder = mantraShuffleOrder ?? <int>[];
+        mantraShuffleOrder = mantraShuffleOrder ?? <int>[],
+        nutritionEntries = nutritionEntries ?? <NutritionEntry>[];
 
   static AppState initial() => AppState(
         tasksByDay: <String, List<Task>>{},
@@ -1406,6 +1544,7 @@ class AppState {
         'stressBucketFills': stressBucketFills,
         'stressBucketEmpties': stressBucketEmpties,
         'doseByDay': doseByDay,
+        'nutritionEntries': nutritionEntries.map((e) => e.toJson()).toList(),
       };
 
   static AppState fromJson(Map<String, dynamic> json) {
@@ -1740,6 +1879,14 @@ class AppState {
     if (rawDose is Map) {
       state.doseByDay = rawDose.map((k, v) =>
           MapEntry(k.toString(), (v is List) ? v.map((e) => e.toString()).toList() : <String>[]));
+    }
+    final rawNutrition = json['nutritionEntries'];
+    if (rawNutrition is List) {
+      state.nutritionEntries = rawNutrition
+          .whereType<Map<String, dynamic>>()
+          .map(NutritionEntry.fromJson)
+          .whereType<NutritionEntry>()
+          .toList();
     }
 
     return state;
