@@ -5,4 +5,4 @@
 /// the one extra manual step release day needs, kept deliberately simple
 /// (no plugin, no platform channel) so a version check never costs the app
 /// a single extra byte of native code.
-const String kAppVersion = '0.5.0';
+const String kAppVersion = '0.7.0';
