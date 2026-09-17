@@ -1,7 +1,7 @@
 name: prakriya
 description: Prakriyā — a daily ritual and manifestation practice app.
 publish_to: 'none'
-version: 0.7.0+21
+version: 0.8.0+22
 
 environment:
   sdk: '>=3.4.0 <4.0.0'
