@@ -516,6 +516,43 @@ const kDigitalProducts = [
   ),
 ];
 
+/// One turn in the in-app mindset-coach conversation (see
+/// coach_chat_screen.dart / coach_chat_service.dart). General-purpose by
+/// design: nothing else in AppState (habits, mood, journal, spending) is
+/// ever sent to the coach — this is just the transcript of what the user
+/// typed and what came back, no more sensitive than any other on-device
+/// text, so it's stored and JSON-round-tripped the same way as every other
+/// tracked list in this file.
+class CoachMessage {
+  final String role; // 'user' | 'assistant'
+  final String content;
+  final DateTime date;
+
+  CoachMessage({required this.role, required this.content, required this.date});
+
+  Map<String, dynamic> toJson() => {
+        'role': role,
+        'content': content,
+        'date': date.toIso8601String(),
+      };
+
+  static CoachMessage? fromJson(Map<String, dynamic> json) {
+    final role = json['role'];
+    final content = json['content'];
+    if (role is! String || (role != 'user' && role != 'assistant')) return null;
+    if (content is! String || content.isEmpty) return null;
+    final rawDate = json['date'];
+    final parsedDate = rawDate is String ? DateTime.tryParse(rawDate) : null;
+    return CoachMessage(role: role, content: content, date: parsedDate ?? DateTime.now());
+  }
+}
+
+/// How many coach messages a user may send per calendar day — a cost
+/// control on a per-request-priced API, not a security boundary (there's no
+/// server-side per-user auth to enforce it against a modified client — see
+/// the hard caps in the Netlify Function itself for the real backstop).
+const kCoachDailyMessageLimit = 20;
+
 const kRelationTypes = ['family', 'friend', 'partner', 'colleague', 'mentor', 'other'];
 
 const kRelationTypeLabels = {
@@ -1313,6 +1350,9 @@ class AppState {
   /// Nutrition & Insights: quick-add meal log — see [NutritionEntry].
   List<NutritionEntry> nutritionEntries;
 
+  /// In-app mindset-coach conversation transcript — see [CoachMessage].
+  List<CoachMessage> coachMessages;
+
   AppState({
     required this.tasksByDay,
     required this.habits,
@@ -1382,10 +1422,12 @@ class AppState {
     required this.stressBucketEmpties,
     required this.doseByDay,
     List<NutritionEntry>? nutritionEntries,
+    List<CoachMessage>? coachMessages,
   })  : mindMapStickyNotes = mindMapStickyNotes ?? <String, List<MindMapStickyNote>>{},
         spendCategories = spendCategories ?? defaultSpendCategories(),
         mantraShuffleOrder = mantraShuffleOrder ?? <int>[],
-        nutritionEntries = nutritionEntries ?? <NutritionEntry>[];
+        nutritionEntries = nutritionEntries ?? <NutritionEntry>[],
+        coachMessages = coachMessages ?? <CoachMessage>[];
 
   static AppState initial() => AppState(
         tasksByDay: <String, List<Task>>{},
@@ -1545,6 +1587,7 @@ class AppState {
         'stressBucketEmpties': stressBucketEmpties,
         'doseByDay': doseByDay,
         'nutritionEntries': nutritionEntries.map((e) => e.toJson()).toList(),
+        'coachMessages': coachMessages.map((m) => m.toJson()).toList(),
       };
 
   static AppState fromJson(Map<String, dynamic> json) {
@@ -1886,6 +1929,14 @@ class AppState {
           .whereType<Map<String, dynamic>>()
           .map(NutritionEntry.fromJson)
           .whereType<NutritionEntry>()
+          .toList();
+    }
+    final rawCoach = json['coachMessages'];
+    if (rawCoach is List) {
+      state.coachMessages = rawCoach
+          .whereType<Map<String, dynamic>>()
+          .map(CoachMessage.fromJson)
+          .whereType<CoachMessage>()
           .toList();
     }
 

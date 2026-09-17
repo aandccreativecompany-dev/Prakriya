@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'mantras.dart';
 import 'models.dart';
 import 'notifications.dart';
+import 'services/coach_chat_service.dart';
 import 'services/update_checker.dart';
 import 'theme.dart' show AppThemePreset, setAccentId, setFontFamily, setFontScale;
 import 'tips.dart';
@@ -1236,6 +1237,65 @@ class Store extends ChangeNotifier {
           loggedOn(DateTime(today.year, today.month, today.day).subtract(Duration(days: i))),
         ),
     ];
+  }
+
+  // ---- In-app mindset coach chat ----
+
+  List<CoachMessage> get coachMessages => _state.coachMessages;
+
+  int get coachMessagesSentToday {
+    final key = dayKey(DateTime.now());
+    return _state.coachMessages
+        .where((m) => m.role == 'user' && dayKey(m.date) == key)
+        .length;
+  }
+
+  bool get coachDailyLimitReached => coachMessagesSentToday >= kCoachDailyMessageLimit;
+
+  /// Sends [text] to the coach and appends both the user's turn and the
+  /// assistant's reply to the transcript. Returns null on success, or a
+  /// friendly error string the screen can show inline (daily limit hit,
+  /// network failure, upstream failure) — nothing here throws past this
+  /// point.
+  Future<String?> sendCoachMessage(String text) async {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return null;
+    if (coachDailyLimitReached) {
+      return "You've reached today's chat limit — back tomorrow for more.";
+    }
+
+    _state.coachMessages.add(
+      CoachMessage(role: 'user', content: trimmed, date: DateTime.now()),
+    );
+    // Keep the persisted transcript bounded — the coach only ever sends the
+    // last ~16 turns as context anyway (below), so months of daily use
+    // shouldn't make this list grow without limit.
+    const maxStored = 120;
+    if (_state.coachMessages.length > maxStored) {
+      _state.coachMessages.removeRange(0, _state.coachMessages.length - maxStored);
+    }
+    await _commit();
+
+    try {
+      final recent = _state.coachMessages.length > 16
+          ? _state.coachMessages.sublist(_state.coachMessages.length - 16)
+          : _state.coachMessages;
+      final reply = await CoachChatService.instance.send([
+        for (final m in recent) (role: m.role, content: m.content),
+      ]);
+      _state.coachMessages.add(
+        CoachMessage(role: 'assistant', content: reply, date: DateTime.now()),
+      );
+      await _commit();
+      return null;
+    } catch (e) {
+      return "Couldn't reach the coach right now — check your connection and try again.";
+    }
+  }
+
+  Future<void> clearCoachChat() async {
+    _state.coachMessages.clear();
+    await _commit();
   }
 
   // ---- Relationships & Connection: people to stay in touch with ----

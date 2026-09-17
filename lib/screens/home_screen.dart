@@ -10,6 +10,7 @@ import 'evening_reflection_screen.dart';
 import 'exercise_timer_screen.dart';
 import 'habit_detail_screen.dart';
 import 'mind_map_screen.dart';
+import 'coach_chat_screen.dart';
 import 'monthly_goals_screen.dart';
 import 'personal_care_screen.dart';
 import 'products_screen.dart';
@@ -206,10 +207,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   if (visible.contains(id)) _itemFor(id),
               ],
             ),
-          // Products isn't a personal-tracking module (nothing here reads or
-          // writes AppState), so it isn't gated by the Settings module
-          // toggle like the sections above — it's always its own tab.
+          // Products and Coach aren't personal-tracking modules gated by the
+          // Settings module toggle like the sections above — they're always
+          // their own tabs.
           const ProductsScreen(embedded: true),
+          const CoachChatScreen(),
         ];
 
         final navItems = <_NavItem>[
@@ -221,6 +223,8 @@ class _HomeScreenState extends State<HomeScreen> {
               icon: Icons.shopping_bag_outlined,
               selectedIcon: Icons.shopping_bag,
               label: 'Products'),
+          const _NavItem(
+              icon: Icons.spa_outlined, selectedIcon: Icons.spa, label: 'Coach'),
         ];
 
         final safeIndex = _tabIndex.clamp(0, tabs.length - 1);
