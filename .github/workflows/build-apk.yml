@@ -53,8 +53,9 @@ jobs:
           if [ ! -f "$GRADLE_FILE" ]; then GRADLE_FILE=android/app/build.gradle; fi
           sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 24/' "$GRADLE_FILE"
           sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 24/' "$GRADLE_FILE"
-          sed -i 's/targetSdk = flutter.targetSdkVersion/targetSdk = 35/' "$GRADLE_FILE"
-          sed -i 's/targetSdkVersion flutter.targetSdkVersion/targetSdkVersion 35/' "$GRADLE_FILE"
+          # Kept in sync with release.yml's targetSdk (36 = Play's current minimum).
+          sed -i 's/targetSdk = flutter.targetSdkVersion/targetSdk = 36/' "$GRADLE_FILE"
+          sed -i 's/targetSdkVersion flutter.targetSdkVersion/targetSdkVersion 36/' "$GRADLE_FILE"
           # flutter_local_notifications needs core library desugaring on API 24+.
           sed -i '/sourceCompatibility = JavaVersion.VERSION_11/a\        isCoreLibraryDesugaringEnabled = true' "$GRADLE_FILE"
           {

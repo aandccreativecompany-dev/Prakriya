@@ -86,6 +86,41 @@ release. Open the release, write the notes, publish.
 The permanent link to hand to users:
 `https://github.com/aandccreativecompany-dev/Prakriya/releases/latest`
 
+## Publishing to the Google Play Store
+
+The same workflow also builds a signed `.aab` (Android App Bundle) — Play
+Console requires this format, not the sideload `.apk`. It's uploaded as a
+workflow artifact (not attached to the GitHub Release): open the tag's run
+under Actions → the completed run → Artifacts → `prakriya-aab`, download and
+unzip it, then upload the `.aab` inside to Play Console.
+
+Before the first submission, all of this needs to be in place once:
+
+1. **Play Console developer account** — one-time registration fee (currently
+   $25; confirm on the live signup flow since Google changes this
+   occasionally), at play.google.com/console.
+2. **Play App Signing enrollment** — when creating the app in Play Console,
+   opt in to Play App Signing and upload using the existing
+   `prakriya-upload.jks` (the same key this repo already signs releases
+   with). Google then re-signs the app for distribution with its own key;
+   your upload key just proves it's really you pushing the update.
+3. **Closed testing** — new developer accounts must run a closed test with
+   at least 12 testers, each opted in continuously for 14 days, before Play
+   grants production access. Start this well before you want to launch —
+   it's a hard two-week minimum.
+4. **Store listing assets** — 512×512 hi-res icon, 1024×500 feature graphic,
+   phone screenshots (the in-app icon source already exists at
+   `assets/icon/`, but the hi-res icon and feature graphic need to be made
+   separately for the listing).
+5. **App content declarations** (Play Console → App content): Data Safety
+   form (declare account email via Google Sign-In, user content — nutrition
+   entries and coach chat messages sent to the AI API — and Firestore cloud
+   backup), the Health apps form (required specifically because of the
+   nutrition-tracking feature, separate from Data Safety), content rating
+   questionnaire, and a privacy policy URL (see below).
+6. **Privacy policy URL** — required because the app collects personal data.
+   Link it both in Play Console and in-app (e.g. in Settings).
+
 ## Release notes template
 
 ```

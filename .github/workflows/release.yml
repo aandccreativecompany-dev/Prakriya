@@ -55,8 +55,11 @@ jobs:
           if [ ! -f "$GRADLE_FILE" ]; then GRADLE_FILE=android/app/build.gradle; fi
           sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 24/' "$GRADLE_FILE"
           sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 24/' "$GRADLE_FILE"
-          sed -i 's/targetSdk = flutter.targetSdkVersion/targetSdk = 35/' "$GRADLE_FILE"
-          sed -i 's/targetSdkVersion flutter.targetSdkVersion/targetSdkVersion 35/' "$GRADLE_FILE"
+          # 36 (Android 16) is Google Play's minimum required targetSdk for
+          # new submissions/updates as of Aug 31 2026 — bump this again next
+          # time Play raises the bar (roughly annual).
+          sed -i 's/targetSdk = flutter.targetSdkVersion/targetSdk = 36/' "$GRADLE_FILE"
+          sed -i 's/targetSdkVersion flutter.targetSdkVersion/targetSdkVersion 36/' "$GRADLE_FILE"
           # flutter_local_notifications needs core library desugaring on API 24+.
           sed -i '/sourceCompatibility = JavaVersion.VERSION_11/a\        isCoreLibraryDesugaringEnabled = true' "$GRADLE_FILE"
           {
@@ -178,10 +181,27 @@ jobs:
       - run: flutter test
       - run: flutter build apk --release
 
-      - name: Name the artifact
+      # Play Console has required the .aab format (not .apk) for new app
+      # uploads since 2021. Built from the same signed, analyzed, tested
+      # source as the sideload APK above — just a different packaging format
+      # for a different distribution channel. Not attached to the GitHub
+      # Release (that stays APK-only for sideloading); instead uploaded as a
+      # workflow artifact so it can be downloaded and pushed to Play Console
+      # by hand.
+      - run: flutter build appbundle --release
+
+      - name: Name the artifacts
         run: |
           mv build/app/outputs/flutter-apk/app-release.apk \
              prakriya-${GITHUB_REF_NAME#v}.apk
+          mv build/app/outputs/bundle/release/app-release.aab \
+             prakriya-${GITHUB_REF_NAME#v}.aab
+
+      - name: Upload the Play Store bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: prakriya-aab
+          path: prakriya-*.aab
 
       # Published immediately (not a draft) and explicitly not marked as a
       # pre-release: GitHub's "latest release" (the page/API the website's
