@@ -567,12 +567,14 @@ class _ModuleStep extends StatelessWidget {
   }
 }
 
-/// Last onboarding step — a clear pitch for signing in, since that's the
-/// one thing that makes data survive a reinstall/new phone (see
-/// CloudSync). Deliberately still skippable: the app stays fully usable and
-/// fully local without an account, this step just makes sure everyone sees
-/// the option and what it buys them, once, up front, rather than only
-/// stumbling on a "Sign in" row buried in Settings.
+/// Last onboarding step — signing in with Google is required to finish
+/// onboarding and reach the home screen. This also gets data backup for
+/// free (see CloudSync): everything entered — habits, priorities, journal,
+/// wallet — backs up automatically under the signed-in account, so a new
+/// phone or reinstall doesn't lose it. There is no "skip" here on purpose;
+/// once signed in, a user can still sign out later from Settings without
+/// losing local access, but the app cannot be set up for the first time
+/// without an account.
 class _SignInStep extends StatefulWidget {
   final VoidCallback onBack;
   final VoidCallback onDone;
@@ -594,7 +596,7 @@ class _SignInStepState extends State<_SignInStep> {
       widget.onDone();
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Couldn't sign in — you can try again later in Settings.")));
+          const SnackBar(content: Text("Couldn't sign in — check your connection and try again.")));
     }
   }
 
@@ -610,26 +612,18 @@ class _SignInStepState extends State<_SignInStep> {
           const SizedBox(height: 22),
           Icon(Icons.cloud_sync_outlined, color: Surfaces.accent(dark), size: 34),
           const SizedBox(height: 16),
-          Text('Never lose this', style: display(23, Surfaces.heading(dark))),
+          Text('Sign in to continue', style: display(23, Surfaces.heading(dark))),
           const SizedBox(height: 8),
           Text(
-            "Sign in and everything you enter — habits, priorities, journal, wallet — "
-            'backs up automatically to your account. Get a new phone, reinstall the app, '
-            "it's all still there. Fully optional: Prakriyā works completely offline without it.",
+            "One last step — sign in with Google to finish setting up Prakriyā. "
+            'Everything you enter — habits, priorities, journal, wallet — backs up '
+            "automatically to your account, so a new phone or reinstall never loses it.",
             style: body(13, Surfaces.muted(dark)).copyWith(height: 1.5),
           ),
           const Spacer(),
           GoldButton(
             labelText: _busy ? 'Signing in…' : 'Sign in with Google',
             onPressed: _busy ? () {} : () => _signIn(),
-          ),
-          const SizedBox(height: 12),
-          Center(
-            child: TextButton(
-              onPressed: _busy ? null : widget.onDone,
-              child: Text('Maybe later',
-                  style: body(13, Surfaces.muted(dark), weight: FontWeight.w600)),
-            ),
           ),
         ],
       ),

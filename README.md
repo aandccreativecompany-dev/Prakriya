@@ -13,9 +13,11 @@ Built and maintained by A&C Creative Company.
 
 **v0.4.1** — current release, distributed as a signed APK on
 [GitHub Releases](https://github.com/aandccreativecompany-dev/Prakriya/releases).
-Local-first: the app works with no network. Signing in is optional and only
-adds a cloud backup of your data under your own Google account — there is
-still no paywall and no forced account.
+Local-first storage: your data lives on-device and everything works with no
+network once set up. Signing in with Google is required to complete
+onboarding (as of the Google Play submission) and adds a cloud backup of
+your data under your own account — there is still no paywall, and you can
+sign out again afterward from Settings without losing local access.
 
 ## What's in the app
 
@@ -68,8 +70,10 @@ still no paywall and no forced account.
   point (text-only; no photo sync yet)
 
 **Platform / polish**
-- Optional Google sign-in with Firebase-backed cloud backup — sync is
-  opt-in, last-write-wins, and nothing else in the app depends on it
+- Google sign-in (required to finish onboarding) with Firebase-backed cloud
+  backup — sync is last-write-wins, and no other feature depends on being
+  signed in, so signing out afterward from Settings still leaves the app
+  fully usable locally
 - Android home-screen widget (habits checklist, top priority, and/or
   today's mantra — user-selectable in Settings)
 - Copy-and-paste backup, for when you don't want an account
@@ -90,8 +94,8 @@ a bug. (Sign-in *is* built — see Platform / polish above.)
 
 - Flutter (Dart) — one codebase, Android first
 - Local storage first (`shared_preferences`): the app works with no network
-- Firebase (Auth, Cloud Firestore) + Google Sign-In for the optional
-  cloud-backup and shared-vision-board features
+- Firebase (Auth, Cloud Firestore) + Google Sign-In, required at onboarding,
+  backing the cloud-backup and shared-vision-board features
 - Local scheduled notifications for reminders (no push infrastructure)
 - Android home-screen widget via `home_widget`
 - Distribution: an APK on GitHub Releases (see `docs/RELEASING.md`); Play

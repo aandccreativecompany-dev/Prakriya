@@ -653,7 +653,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                   ),
                                 ] else ...[
                                   Text(
-                                    'Sign in with Google to back your data up and sync it across your devices. Optional — everything works fully offline without it.',
+                                    "You're signed out. Sign back in with Google to back your data up and sync it across your devices — your local entries on this phone are untouched either way.",
                                     textAlign: TextAlign.justify,
                                     style: body(12.5, Surfaces.muted(dark)).copyWith(height: 1.4),
                                   ),
