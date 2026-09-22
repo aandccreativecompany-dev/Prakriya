@@ -547,6 +547,12 @@ class CoachMessage {
   }
 }
 
+/// Master switch for the in-app AI coach (Coach tab + its Netlify Function
+/// backend). Off for now — flip back to true to bring the tab back; no
+/// other code needs to change, the screen/service/store methods are all
+/// still there, just unreachable from the UI while this is false.
+const kCoachChatEnabled = false;
+
 /// How many coach messages a user may send per calendar day — a cost
 /// control on a per-request-priced API, not a security boundary (there's no
 /// server-side per-user auth to enforce it against a modified client — see

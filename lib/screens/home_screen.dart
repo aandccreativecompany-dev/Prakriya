@@ -209,9 +209,11 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           // Products and Coach aren't personal-tracking modules gated by the
           // Settings module toggle like the sections above — they're always
-          // their own tabs.
+          // their own tabs. Coach itself is further gated by
+          // kCoachChatEnabled (see models.dart) — off for now, so its tab is
+          // skipped entirely rather than shown disabled.
           const ProductsScreen(embedded: true),
-          const CoachChatScreen(),
+          if (kCoachChatEnabled) const CoachChatScreen(),
         ];
 
         final navItems = <_NavItem>[
@@ -223,8 +225,9 @@ class _HomeScreenState extends State<HomeScreen> {
               icon: Icons.shopping_bag_outlined,
               selectedIcon: Icons.shopping_bag,
               label: 'Products'),
-          const _NavItem(
-              icon: Icons.spa_outlined, selectedIcon: Icons.spa, label: 'Coach'),
+          if (kCoachChatEnabled)
+            const _NavItem(
+                icon: Icons.spa_outlined, selectedIcon: Icons.spa, label: 'Coach'),
         ];
 
         final safeIndex = _tabIndex.clamp(0, tabs.length - 1);
