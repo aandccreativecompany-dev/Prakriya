@@ -14,6 +14,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "191375066674-2dh600207qmcvl68sp2pnlrrlhdl8r1h.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "ai.aandccreative.prakriya",
+            "certificate_hash": "26f4f9076016729e49244cb3c88af97cea13131f"
+          }
+        },
+        {
           "client_id": "191375066674-3drn1dfja3vt30ku3q859phanq4mcv90.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {

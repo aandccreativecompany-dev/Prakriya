@@ -32,6 +32,7 @@ class Store extends ChangeNotifier {
   /// startup and never throws. Safe to call once per launch (see main.dart);
   /// a dismissed version is skipped until something newer comes out.
   Future<void> checkForUpdate() async {
+    if (!kGithubUpdateCheckEnabled) return;
     try {
       final info = await UpdateChecker.instance.checkForUpdate();
       if (info == null) return;

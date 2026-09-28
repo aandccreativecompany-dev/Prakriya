@@ -553,6 +553,11 @@ class CoachMessage {
 /// still there, just unreachable from the UI while this is false.
 const kCoachChatEnabled = false;
 
+/// Master switch for the in-app "new version on GitHub" banner. Off for the
+/// Google Play build: Play delivers updates itself, and the banner links to
+/// sideload releases on GitHub. Flip to true only for a sideload (APK) build.
+const kGithubUpdateCheckEnabled = false;
+
 /// How many coach messages a user may send per calendar day — a cost
 /// control on a per-request-priced API, not a security boundary (there's no
 /// server-side per-user auth to enforce it against a modified client — see
