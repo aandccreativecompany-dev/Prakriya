@@ -14,27 +14,27 @@ class AboutScreen extends StatelessWidget {
   static const _links = [
     (
       'Website',
-      'aandccreativecompany.netlify.app',
+      'aandccreativeventures.com',
       Icons.language,
-      'https://aandccreativecompany.netlify.app/',
+      'https://aandccreativeventures.com/',
     ),
     (
       'Instagram',
-      '@aandccreativecompany',
+      '@aandccreativeventures',
       Icons.camera_alt_outlined,
-      'https://www.instagram.com/aandccreativecompany/',
+      'https://www.instagram.com/aandccreativeventures/',
     ),
     (
       'YouTube',
-      '@aandccreativecompany',
+      '@aandccreativeventures',
       Icons.play_circle_outline,
-      'https://www.youtube.com/@aandccreativecompany',
+      'https://www.youtube.com/@aandccreativeventures',
     ),
     (
       'Threads',
-      '@aandccreativecompany',
+      '@aandccreativeventures',
       Icons.tag,
-      'https://www.threads.net/@aandccreativecompany',
+      'https://www.threads.com/@aandccreativeventures',
     ),
   ];
 

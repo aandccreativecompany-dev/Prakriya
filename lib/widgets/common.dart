@@ -478,7 +478,17 @@ const List<String> kMascotGreetings = [
 class GreetingMascot extends StatefulWidget {
   final String avatarGender;
   final String greeting;
-  const GreetingMascot({super.key, required this.avatarGender, required this.greeting});
+  /// Called once, right when the walk-across animation finishes and this
+  /// widget collapses to nothing. Lets a parent that reserved layout space
+  /// for the animation (see DashboardScreen) shrink that space back down
+  /// instead of leaving a permanent empty gap once the mascot is gone.
+  final VoidCallback? onDone;
+  const GreetingMascot({
+    super.key,
+    required this.avatarGender,
+    required this.greeting,
+    this.onDone,
+  });
 
   @override
   State<GreetingMascot> createState() => _GreetingMascotState();
@@ -498,6 +508,7 @@ class _GreetingMascotState extends State<GreetingMascot>
     _controller.addStatusListener((status) {
       if (status == AnimationStatus.completed && mounted) {
         setState(() => _dismissed = true);
+        widget.onDone?.call();
       }
     });
   }

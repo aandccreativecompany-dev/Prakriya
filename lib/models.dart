@@ -1023,6 +1023,7 @@ const kAllModuleIds = [
   'priorities',
   'habits',
   'tips',
+  'progressSummary',
   'scripting',
   'eveningReflection',
   'visionBoard',
@@ -1040,6 +1041,7 @@ const kModuleTitles = {
   'priorities': 'Goals & to-dos',
   'habits': 'Habits',
   'tips': 'Productivity tip',
+  'progressSummary': 'This week\'s progress',
   'scripting': 'Journaling (Brain Dump)',
   'eveningReflection': 'Evening reflection',
   'visionBoard': 'Vision board',
@@ -1143,7 +1145,7 @@ const kVisionBackgroundLabels = {
 /// Which section of the swipeable home each module lives in. `mantra` isn't
 /// listed — it sits above every section as a standalone banner.
 const kProductivityModuleIds = ['priorities', 'habits', 'tips', 'reminders'];
-const kOutcomeModuleIds = ['scripting', 'eveningReflection', 'visionBoard', 'mindMap'];
+const kOutcomeModuleIds = ['progressSummary', 'scripting', 'eveningReflection', 'visionBoard', 'mindMap'];
 const kFinanceModuleIds = ['financeGoals'];
 const kHealthModuleIds = ['healthGoals'];
 const kMindsetModuleIds = ['mindsetGoals'];

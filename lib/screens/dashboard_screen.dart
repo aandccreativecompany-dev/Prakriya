@@ -15,10 +15,23 @@ import 'settings_screen.dart';
 /// summary, all in one place instead of being repeated at the top of every
 /// section. Each other section is reached from here (or the bottom nav)
 /// as its own separate, focused screen.
-class DashboardScreen extends StatelessWidget {
+class DashboardScreen extends StatefulWidget {
   final List<HomePageSection> sections;
   final void Function(String sectionKey) onOpenSection;
   const DashboardScreen({super.key, required this.sections, required this.onOpenSection});
+
+  @override
+  State<DashboardScreen> createState() => _DashboardScreenState();
+}
+
+class _DashboardScreenState extends State<DashboardScreen> {
+  // The GreetingMascot below plays a one-time ~3.4s walk-across animation,
+  // then collapses to nothing. The 90px gap it walks through used to be a
+  // fixed SizedBox, so once the mascot vanished that gap stayed reserved
+  // forever — a permanent empty strip between the greeting and the mantra
+  // card on every dashboard visit. Shrinking it here once the animation
+  // reports itself done keeps the space only while it's actually in use.
+  bool _mascotDone = false;
 
   String _greeting() {
     final hour = DateTime.now().hour;
@@ -106,7 +119,11 @@ class DashboardScreen extends StatelessWidget {
                     const SizedBox(height: 14),
                     _SignInBanner(dark: dark),
                   ],
-                  const SizedBox(height: 90),
+                  AnimatedSize(
+                    duration: const Duration(milliseconds: 320),
+                    curve: Curves.easeOut,
+                    child: SizedBox(height: _mascotDone ? 8 : 90),
+                  ),
                   InkWell(
                     borderRadius: BorderRadius.circular(20),
                     onTap: () => Navigator.of(context)
@@ -175,13 +192,13 @@ class DashboardScreen extends StatelessWidget {
                     crossAxisSpacing: 10,
                     childAspectRatio: 1.7,
                     children: [
-                      for (final section in sections)
+                      for (final section in widget.sections)
                         _SectionTile(
                           title: section.title,
                           icon: _sectionIcon(section.key),
                           performance: store.sectionPerformance(section.key),
                           dark: dark,
-                          onTap: () => onOpenSection(section.key),
+                          onTap: () => widget.onOpenSection(section.key),
                         ),
                     ],
                   ),
@@ -216,6 +233,9 @@ class DashboardScreen extends StatelessWidget {
                       child: GreetingMascot(
                         avatarGender: store.avatarGender,
                         greeting: mascotGreeting,
+                        onDone: () {
+                          if (mounted) setState(() => _mascotDone = true);
+                        },
                       ),
                     ),
                   ),

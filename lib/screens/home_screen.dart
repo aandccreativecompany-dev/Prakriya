@@ -120,6 +120,8 @@ class _HomeScreenState extends State<HomeScreen> {
         return const _HabitsContent();
       case 'tips':
         return const _TipItem();
+      case 'progressSummary':
+        return const _ProgressSummary();
       case 'eveningReflection':
         return const _EveningReflectionItem();
       case 'reminders':
@@ -922,6 +924,90 @@ class _WeekDots extends StatelessWidget {
           }),
           if (i != 0) const SizedBox(width: 4),
         ],
+      ],
+    );
+  }
+}
+
+class _ProgressSummary extends StatelessWidget {
+  const _ProgressSummary();
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final today = DateTime.now();
+    // Real per-day data only — no invented numbers. A day counts as
+    // "engaged" if either a manifestation script was written that day
+    // (Script.createdAt) or an evening reflection was saved for it
+    // (journalFor always returns a safe default JournalEntry, so calling
+    // .isEmpty on any date — including ones with nothing saved — is fine).
+    final activeDays = <bool>[];
+    for (var i = 6; i >= 0; i--) {
+      final day = DateTime(today.year, today.month, today.day).subtract(Duration(days: i));
+      final key = dayKey(day);
+      final scripted = store.scripts.any((s) => dayKey(s.createdAt) == key);
+      final journaled = !store.journalFor(day).isEmpty;
+      activeDays.add(scripted || journaled);
+    }
+    final activeCount = activeDays.where((d) => d).length;
+    final pct = activeCount / 7;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('This week', style: label(Surfaces.muted(dark))),
+        const SizedBox(height: 10),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Text('$activeCount', style: display(28, Surfaces.heading(dark))),
+            const SizedBox(width: 6),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 5),
+              child: Text('of 7 days engaged',
+                  style: body(12.5, Surfaces.muted(dark))),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(6),
+          child: LinearProgressIndicator(
+            value: pct,
+            minHeight: 8,
+            backgroundColor: Surfaces.cardBorder(dark),
+            valueColor: AlwaysStoppedAnimation(Surfaces.accent(dark)),
+          ),
+        ),
+        const SizedBox(height: 14),
+        // Same small-dot streak language already used for habits elsewhere
+        // in the app, applied here to journaling + scripting instead.
+        Row(
+          children: [
+            for (var i = 0; i < 7; i++) ...[
+              Container(
+                width: 20,
+                height: 20,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: activeDays[i]
+                      ? Surfaces.accent(dark)
+                      : Colors.transparent,
+                  border: Border.all(
+                    color: activeDays[i]
+                        ? Surfaces.accent(dark)
+                        : Surfaces.muted(dark).withValues(alpha: 0.35),
+                    width: 1.2,
+                  ),
+                ),
+                child: activeDays[i]
+                    ? const Icon(Icons.check, size: 12, color: Colors.white)
+                    : null,
+              ),
+              if (i != 6) const SizedBox(width: 8),
+            ],
+          ],
+        ),
       ],
     );
   }
