@@ -1026,7 +1026,12 @@ class _ScriptingItem extends StatelessWidget {
           .push(MaterialPageRoute(builder: (_) => const ScriptingScreen())),
       child: _ItemHeader(
         icon: Icons.auto_awesome,
-        title: 'Journaling (Brain Dump)',
+        // Shortened just for this compact row — the trailing "N written"
+        // label shares the row's width with the title (see _ItemHeader),
+        // and the full name was long enough to get cut off mid-word
+        // ("Journaling (Brain..."). The full name still appears on the
+        // Journaling screen's own header when this row is opened.
+        title: 'Journaling',
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -1115,7 +1120,11 @@ class _MindMapItem extends StatelessWidget {
           .push(MaterialPageRoute(builder: (_) => const MindMapScreen())),
       child: _ItemHeader(
         icon: Icons.account_tree_outlined,
-        title: 'Organized mind map',
+        // Same reasoning as the Journaling row above: shortened so it
+        // doesn't get cut off mid-word next to the "Day · week · month"
+        // trailing label. The full name still appears on that screen's
+        // own header.
+        title: 'Mind map',
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
