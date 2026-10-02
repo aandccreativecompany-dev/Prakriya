@@ -89,6 +89,30 @@ const kAccentPalettes = [
     pale: Color(0xFFFFDECE),
     deep: Color(0xFFB8481F),
   ),
+  AccentPalette(
+    id: 'teal',
+    label: 'Teal',
+    dark: Color(0xFF6FE0D0),
+    light: Color(0xFF1FA396),
+    pale: Color(0xFFD2F5F0),
+    deep: Color(0xFF0D6D63),
+  ),
+  AccentPalette(
+    id: 'indigo',
+    label: 'Indigo',
+    dark: Color(0xFF9FA8FF),
+    light: Color(0xFF5A64E0),
+    pale: Color(0xFFE2E4FF),
+    deep: Color(0xFF3A3FA0),
+  ),
+  AccentPalette(
+    id: 'sunset',
+    label: 'Sunset',
+    dark: Color(0xFFFFB36F),
+    light: Color(0xFFE8822E),
+    pale: Color(0xFFFFE6CC),
+    deep: Color(0xFFA85A14),
+  ),
 ];
 
 /// The currently selected accent, module-level so [Surfaces] (a pure,
@@ -126,6 +150,10 @@ const kFontFamilies = [
   AppFont('montserrat', 'Montserrat', 'Montserrat'),
   AppFont('lora', 'Lora', 'Lora'),
   AppFont('merriweather', 'Merriweather', 'Merriweather'),
+  AppFont('dmSans', 'DM Sans', 'DM Sans'),
+  AppFont('spaceGrotesk', 'Space Grotesk', 'Space Grotesk'),
+  AppFont('sourceSans', 'Source Sans 3', 'Source Sans 3'),
+  AppFont('fraunces', 'Fraunces', 'Fraunces'),
 ];
 
 /// One selectable text size scale. Kept to a small, hand-picked set of
