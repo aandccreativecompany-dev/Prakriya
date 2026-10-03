@@ -10,8 +10,8 @@ class QuoteScreen extends StatelessWidget {
   const QuoteScreen({super.key});
 
   static const _shareFooter = 'A and C Creative Ventures\n'
-      'aandccreativecompany.netlify.app\n'
-      'IG/Threads/YT @aandccreativecompany';
+      'aandccreativeventures.com\n'
+      'IG/Threads/YT @aandccreativeventures';
 
   @override
   Widget build(BuildContext context) {

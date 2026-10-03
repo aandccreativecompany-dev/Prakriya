@@ -468,7 +468,24 @@ class _SectionScreenState extends State<_SectionScreen> {
         duration: const Duration(milliseconds: 420), curve: Curves.easeOutCubic);
   }
 
-  Future<void> _refresh() async => store.load();
+  // store.load() unconditionally overwrites in-memory state with whatever
+  // is currently on disk. Every store.addX(...)/setX(...) call already
+  // updates the screen instantly (via the synchronous notifyListeners()
+  // inside _commit()), but the matching disk write is queued and finishes
+  // slightly later in the background — so without this flush() first, a
+  // pull-to-refresh done shortly after entering something could re-read
+  // disk before that write lands, and load() would then replace the
+  // in-memory state (including the thing you just entered) with the
+  // older, still-on-disk version. That exactly matched the "it doesn't
+  // save until I close and reopen the app" report: closing the app
+  // properly flushes pending writes first (see main.dart's lifecycle
+  // handling), so reopening always saw the latest data, while refreshing
+  // without closing could actually revert it. Awaiting the flush here
+  // guarantees load() can only ever see the same state or newer.
+  Future<void> _refresh() async {
+    await store.flush();
+    await store.load();
+  }
 
   @override
   Widget build(BuildContext context) {
