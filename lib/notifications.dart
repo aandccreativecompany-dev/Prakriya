@@ -74,6 +74,35 @@ class Notifications {
     return granted ?? false;
   }
 
+  /// Exact alarms fire on time even in Doze; inexact ones can be deferred
+  /// for a long time (or dropped) by aggressive phone brands. Android 14+
+  /// makes the user grant this in a special-access screen.
+  Future<bool> exactAllowed() async {
+    try {
+      await init();
+      final android = _plugin.resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
+      return await android?.canScheduleExactNotifications() ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> requestExact() async {
+    try {
+      await init();
+      final android = _plugin.resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
+      await android?.requestExactAlarmsPermission();
+    } catch (e) {
+      debugPrint('Prakriya: exact alarm request failed: $e');
+    }
+  }
+
+  Future<AndroidScheduleMode> _mode() async => (await exactAllowed())
+      ? AndroidScheduleMode.exactAllowWhileIdle
+      : AndroidScheduleMode.inexactAllowWhileIdle;
+
   Future<bool> permissionGranted() async {
     await init();
     final android = _plugin.resolvePlatformSpecificImplementation<
@@ -128,7 +157,7 @@ class Notifications {
       "Today's the day — ${keyDate.title}.",
       tz.TZDateTime.from(scheduled, tz.local),
       _details,
-      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+      androidScheduleMode: await _mode(),
       uiLocalNotificationDateInterpretation:
           UILocalNotificationDateInterpretation.absoluteTime,
     );
@@ -220,7 +249,7 @@ class Notifications {
       body,
       _nextInstance(hour, minute),
       _details,
-      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+      androidScheduleMode: await _mode(),
       uiLocalNotificationDateInterpretation:
           UILocalNotificationDateInterpretation.absoluteTime,
       matchDateTimeComponents: DateTimeComponents.time,
@@ -321,7 +350,7 @@ class Notifications {
                 'Open your wallet to see where it went this week.',
                 _nextWeekday(DateTime.sunday, reminder.hour, reminder.minute),
                 _details,
-                androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+                androidScheduleMode: await _mode(),
                 uiLocalNotificationDateInterpretation:
                     UILocalNotificationDateInterpretation.absoluteTime,
                 matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
@@ -336,7 +365,7 @@ class Notifications {
                 'A new month just started — check last month\'s totals in your wallet.',
                 _nextDayOfMonth(1, reminder.hour, reminder.minute),
                 _details,
-                androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+                androidScheduleMode: await _mode(),
                 uiLocalNotificationDateInterpretation:
                     UILocalNotificationDateInterpretation.absoluteTime,
                 matchDateTimeComponents: DateTimeComponents.dayOfMonthAndTime,

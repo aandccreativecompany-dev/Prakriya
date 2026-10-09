@@ -13,7 +13,9 @@ class RemindersScreen extends StatefulWidget {
   State<RemindersScreen> createState() => _RemindersScreenState();
 }
 
-class _RemindersScreenState extends State<RemindersScreen> {
+class _RemindersScreenState extends State<RemindersScreen>
+    with WidgetsBindingObserver {
+  bool _exactOk = true;
   bool _permissionGranted = true;
   String _testMessage = '';
   String _status = '';
@@ -21,14 +23,32 @@ class _RemindersScreenState extends State<RemindersScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _checkPermission();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  // Coming back from the system "Alarms & reminders" screen: pick up the
+  // new permission state and reschedule with exact alarms straight away.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      store.rescheduleReminders().then((_) => _checkPermission());
+    }
   }
 
   Future<void> _checkPermission() async {
     final granted = await Notifications.instance.permissionGranted();
     final status = await Notifications.instance.statusSummary();
+    final exact = await Notifications.instance.exactAllowed();
     if (mounted) {
       setState(() {
+        _exactOk = exact;
         _permissionGranted = granted;
         _status = status;
       });
@@ -128,6 +148,31 @@ class _RemindersScreenState extends State<RemindersScreen> {
                                         }
                                         await store.rescheduleReminders();
                                       },
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          if (_permissionGranted && !_exactOk)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 14),
+                              child: ModuleCard(
+                                accent: true,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text('Allow on-time reminders',
+                                        style: body(13.5, Surfaces.accentText(dark),
+                                            weight: FontWeight.w700)),
+                                    const SizedBox(height: 6),
+                                    Text(
+                                        'Without this, your phone can delay or skip reminders when it is idle. Tap below, then switch on "Allow setting alarms and reminders" for Prakriyā.',
+                                        style: body(12.5, Surfaces.bodyText(dark))),
+                                    const SizedBox(height: 14),
+                                    GoldButton(
+                                      labelText: 'Allow on-time reminders',
+                                      onPressed: () =>
+                                          Notifications.instance.requestExact(),
                                     ),
                                   ],
                                 ),
@@ -486,7 +531,7 @@ class _RemindersScreenState extends State<RemindersScreen> {
       case 'mantra':
         return 'Sent with your top 3 priorities';
       case 'midday':
-        return 'Only if something is still open';
+        return 'Your open priorities, around midday';
       case 'evening':
         return 'Habits and tomorrow';
       case 'spendWeekly':

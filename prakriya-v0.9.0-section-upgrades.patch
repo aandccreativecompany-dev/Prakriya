@@ -1,0 +1,1619 @@
+diff --git a/lib/main.dart b/lib/main.dart
+index f6bbe8f..71a60c8 100644
+--- a/lib/main.dart
++++ b/lib/main.dart
+@@ -11,6 +11,7 @@ import 'screens/lock_screen.dart';
+ import 'screens/onboarding_screen.dart';
+ import 'services/auth_service.dart';
+ import 'services/cloud_sync.dart';
++import 'services/extras.dart';
+ import 'services/home_widget_service.dart';
+ import 'store.dart';
+ import 'theme.dart';
+@@ -89,6 +90,11 @@ Future<void> main() async {
+       // force it here so the UI doesn't sit waiting on it forever.
+       store.ready = true;
+     }
++    try {
++      await extras.load();
++    } catch (error, stack) {
++      debugPrint('extras.load failed: $error\n$stack');
++    }
+     try {
+       HomeWidgetService.instance.wire();
+     } catch (error, stack) {
+diff --git a/lib/screens/dashboard_screen.dart b/lib/screens/dashboard_screen.dart
+index ca89833..e35fcf4 100644
+--- a/lib/screens/dashboard_screen.dart
++++ b/lib/screens/dashboard_screen.dart
+@@ -6,7 +6,9 @@ import '../models.dart';
+ import '../services/auth_service.dart';
+ import '../store.dart';
+ import '../theme.dart';
++import '../widgets/boosters.dart';
+ import '../widgets/common.dart';
++import 'reminders_screen.dart';
+ import 'about_screen.dart';
+ import 'quote_screen.dart';
+ import 'settings_screen.dart';
+@@ -187,6 +189,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
+                       ),
+                     ],
+                   ),
++                  FirstWeekChecklist(
++                    onOpenProductivity: () => widget.onOpenSection('productivity'),
++                    onOpenReminders: () => Navigator.of(context).push(
++                        MaterialPageRoute(builder: (_) => const RemindersScreen())),
++                  ),
++                  const WeeklyRecapCard(),
+                   const SizedBox(height: 22),
+                   Text('YOUR SECTIONS', style: label(Surfaces.muted(dark))),
+                   const SizedBox(height: 10),
+diff --git a/lib/screens/home_screen.dart b/lib/screens/home_screen.dart
+index c01ff2e..e1caf57 100644
+--- a/lib/screens/home_screen.dart
++++ b/lib/screens/home_screen.dart
+@@ -4,6 +4,7 @@ import 'package:flutter/services.dart' show HapticFeedback;
+ import '../models.dart';
+ import '../store.dart';
+ import '../theme.dart';
++import '../widgets/boosters.dart';
+ import '../widgets/common.dart';
+ import 'dashboard_screen.dart';
+ import 'evening_reflection_screen.dart';
+@@ -119,6 +120,46 @@ class _HomeScreenState extends State<HomeScreen> {
+   // stale until you switched tabs or reopened the app.
+   Widget _itemFor(String id) => _LiveItem(() => _rawItemFor(id));
+ 
++  void _openTodos() => Navigator.of(context)
++      .push(MaterialPageRoute(builder: (_) => const TodoListScreen()));
++
++  /// A section's items: the new booster cards for that section, then the
++  /// section's own modules (habit insights go right after the habit list).
++  List<Widget> _itemsFor(HomePageSection section, List<String> visible) {
++    final pre = <Widget>[];
++    switch (section.key) {
++      case 'productivity':
++        pre.add(TopThreeCard(onAdd: _openTodos));
++        pre.add(const FocusTimerCard());
++        break;
++      case 'finance':
++        pre.add(MoneySnapshotCard(
++          onOpenWallet: () => Navigator.of(context).push(
++              MaterialPageRoute(builder: (_) => const SpendingTrackerScreen())),
++        ));
++        break;
++      case 'health':
++        pre.add(const HealthQuickLogCard());
++        break;
++      case 'mindset':
++        pre.add(const GratitudeCard());
++        break;
++      case 'relationships':
++        pre.add(const ReachOutCard());
++        break;
++      case 'nutrition':
++        pre.add(const RepeatMealCard());
++        break;
++    }
++    final items = <Widget>[...pre];
++    for (final id in section.moduleIds) {
++      if (!visible.contains(id)) continue;
++      items.add(_itemFor(id));
++      if (id == 'habits') items.add(const HabitInsightsCard());
++    }
++    return items;
++  }
++
+   // ignore: prefer_const_constructors
+   Widget _rawItemFor(String id) {
+     switch (id) {
+@@ -172,10 +213,7 @@ class _HomeScreenState extends State<HomeScreen> {
+       builder: (_) => _SectionScreen(
+         title: section.title,
+         sectionKey: section.key,
+-        items: [
+-          for (final id in section.moduleIds)
+-            if (visible.contains(id)) _itemFor(id),
+-        ],
++        items: _itemsFor(section, visible),
+       ),
+     ));
+   }
+@@ -212,10 +250,7 @@ class _HomeScreenState extends State<HomeScreen> {
+               title: section.title,
+               sectionKey: section.key,
+               showBackButton: false,
+-              items: [
+-                for (final id in section.moduleIds)
+-                  if (visible.contains(id)) _itemFor(id),
+-              ],
++              items: _itemsFor(section, visible),
+             ),
+           // Products and Coach aren't personal-tracking modules gated by the
+           // Settings module toggle like the sections above — they're always
+diff --git a/lib/screens/todo_list_screen.dart b/lib/screens/todo_list_screen.dart
+index 01f23ad..3ebd9e9 100644
+--- a/lib/screens/todo_list_screen.dart
++++ b/lib/screens/todo_list_screen.dart
+@@ -89,9 +89,39 @@ class _TodoListScreenState extends State<TodoListScreen> {
+                     const SizedBox(height: 8),
+                     Expanded(
+                       child: tasks.isEmpty
+-                          ? Center(
+-                              child: Text('Nothing on the list yet.',
+-                                  style: body(13, Surfaces.muted(dark))),
++                          ? ListView(
++                              padding: const EdgeInsets.fromLTRB(20, 32, 20, 32),
++                              children: [
++                                Icon(Icons.wb_twilight_rounded,
++                                    size: 44, color: Surfaces.accent(dark)),
++                                const SizedBox(height: 12),
++                                Text('A clear page. What would make today a win?',
++                                    textAlign: TextAlign.center,
++                                    style: body(15, Surfaces.heading(dark),
++                                        weight: FontWeight.w700)),
++                                const SizedBox(height: 6),
++                                Text('Type above, or tap a starter to add it in one go.',
++                                    textAlign: TextAlign.center,
++                                    style: body(12.5, Surfaces.muted(dark))),
++                                const SizedBox(height: 16),
++                                Wrap(
++                                  alignment: WrapAlignment.center,
++                                  spacing: 8,
++                                  runSpacing: 6,
++                                  children: [
++                                    for (final starter in const [
++                                      'Plan my top 3',
++                                      'Move for 20 minutes',
++                                      'Drink 8 glasses of water',
++                                      'Reach out to someone',
++                                    ])
++                                      ActionChip(
++                                        label: Text(starter),
++                                        onPressed: () => store.addTask(starter),
++                                      ),
++                                  ],
++                                ),
++                              ],
+                             )
+                           : ListView.builder(
+                               padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+@@ -105,6 +135,36 @@ class _TodoListScreenState extends State<TodoListScreen> {
+                                     offset: Offset(0, (1 - t.clamp(0, 1)) * 10),
+                                     child: Opacity(opacity: t.clamp(0, 1), child: child),
+                                   ),
++                                  child: Dismissible(
++                                    key: ObjectKey(tasks[i]),
++                                    background: Container(
++                                      margin: const EdgeInsets.only(bottom: 10),
++                                      padding: const EdgeInsets.only(left: 20),
++                                      alignment: Alignment.centerLeft,
++                                      decoration: BoxDecoration(
++                                        color: Colors.green.withValues(alpha: 0.25),
++                                        borderRadius: BorderRadius.circular(20),
++                                      ),
++                                      child: const Icon(Icons.check_rounded),
++                                    ),
++                                    secondaryBackground: Container(
++                                      margin: const EdgeInsets.only(bottom: 10),
++                                      padding: const EdgeInsets.only(right: 20),
++                                      alignment: Alignment.centerRight,
++                                      decoration: BoxDecoration(
++                                        color: Colors.redAccent.withValues(alpha: 0.25),
++                                        borderRadius: BorderRadius.circular(20),
++                                      ),
++                                      child: const Icon(Icons.delete_outline),
++                                    ),
++                                    confirmDismiss: (direction) async {
++                                      if (direction == DismissDirection.startToEnd) {
++                                        await store.toggleTask(i);
++                                        return false;
++                                      }
++                                      return true;
++                                    },
++                                    onDismissed: (_) => store.removeTask(i),
+                                   child: Padding(
+                                     padding: const EdgeInsets.only(bottom: 10),
+                                     child: ModuleCard(
+@@ -151,6 +211,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
+                                       ),
+                                     ),
+                                   ),
++                                  ),
+                                 );
+                               },
+                             ),
+diff --git a/lib/services/extras.dart b/lib/services/extras.dart
+new file mode 100644
+index 0000000..bae4dbd
+--- /dev/null
++++ b/lib/services/extras.dart
+@@ -0,0 +1,202 @@
++import 'dart:async';
++import 'dart:convert';
++
++import 'package:flutter/foundation.dart';
++import 'package:shared_preferences/shared_preferences.dart';
++
++import '../models.dart' show dayKey;
++
++/// Small, self-contained store for the newer lightweight features (focus
++/// timer, gratitude lines, water/sleep log, checklist and recap state).
++///
++/// It deliberately lives outside [Store]/AppState: it keeps its own JSON blob
++/// in SharedPreferences, so adding or changing it can never corrupt or reset
++/// the user's existing saved data. Changes notify listeners immediately and
++/// the disk write happens in the background.
++class Extras extends ChangeNotifier {
++  static const _key = 'prakriya_extras_v1';
++
++  /// day key -> focus minutes completed that day.
++  final Map<String, int> focusMinutes = <String, int>{};
++
++  /// day key -> one-line gratitude.
++  final Map<String, String> gratitude = <String, String>{};
++
++  /// day key -> glasses of water.
++  final Map<String, int> water = <String, int>{};
++
++  /// day key -> hours slept (the night leading into that day).
++  final Map<String, double> sleep = <String, double>{};
++
++  bool checklistDismissed = false;
++
++  /// Monday day key of the week whose recap card was dismissed.
++  String recapDismissedWeek = '';
++
++  /// Day key on which yesterday's unfinished tasks were last carried over (or
++  /// the offer was skipped), so the offer shows once per day.
++  String carriedOverOn = '';
++
++  Future<void> load() async {
++    try {
++      final prefs = await SharedPreferences.getInstance();
++      final raw = prefs.getString(_key);
++      if (raw != null && raw.isNotEmpty) {
++        final decoded = jsonDecode(raw);
++        if (decoded is Map<String, dynamic>) {
++          _readIntMap(decoded['focusMinutes'], focusMinutes);
++          _readStringMap(decoded['gratitude'], gratitude);
++          _readIntMap(decoded['water'], water);
++          final s = decoded['sleep'];
++          sleep.clear();
++          if (s is Map) {
++            s.forEach((dynamic k, dynamic v) {
++              if (v is num) sleep['$k'] = v.toDouble();
++            });
++          }
++          checklistDismissed = decoded['checklistDismissed'] == true;
++          recapDismissedWeek = decoded['recapDismissedWeek'] is String
++              ? decoded['recapDismissedWeek'] as String
++              : '';
++          carriedOverOn = decoded['carriedOverOn'] is String
++              ? decoded['carriedOverOn'] as String
++              : '';
++        }
++      }
++    } catch (e) {
++      debugPrint('Extras.load failed: $e');
++    }
++    notifyListeners();
++  }
++
++  static void _readIntMap(dynamic source, Map<String, int> into) {
++    into.clear();
++    if (source is Map) {
++      source.forEach((dynamic k, dynamic v) {
++        if (v is num) into['$k'] = v.toInt();
++      });
++    }
++  }
++
++  static void _readStringMap(dynamic source, Map<String, String> into) {
++    into.clear();
++    if (source is Map) {
++      source.forEach((dynamic k, dynamic v) {
++        if (v is String) into['$k'] = v;
++      });
++    }
++  }
++
++  void _changed() {
++    notifyListeners();
++    unawaited(_write());
++  }
++
++  Future<void> _write() async {
++    try {
++      final prefs = await SharedPreferences.getInstance();
++      await prefs.setString(
++        _key,
++        jsonEncode(<String, dynamic>{
++          'focusMinutes': focusMinutes,
++          'gratitude': gratitude,
++          'water': water,
++          'sleep': sleep,
++          'checklistDismissed': checklistDismissed,
++          'recapDismissedWeek': recapDismissedWeek,
++          'carriedOverOn': carriedOverOn,
++        }),
++      );
++    } catch (e) {
++      debugPrint('Extras save failed: $e');
++    }
++  }
++
++  // ---- Focus ----
++
++  String get todayKey => dayKey(DateTime.now());
++
++  int focusMinutesOn(DateTime day) => focusMinutes[dayKey(day)] ?? 0;
++
++  int get totalFocusMinutes =>
++      focusMinutes.values.fold<int>(0, (sum, v) => sum + v);
++
++  void addFocusMinutes(int minutes) {
++    focusMinutes[todayKey] = (focusMinutes[todayKey] ?? 0) + minutes;
++    _changed();
++  }
++
++  /// Consecutive days with at least one focus session. A day that hasn't had
++  /// a session yet doesn't break a streak that was alive yesterday.
++  int get focusStreak {
++    var cursor = DateTime.now();
++    if (focusMinutesOn(cursor) == 0) {
++      cursor = cursor.subtract(const Duration(days: 1));
++    }
++    var count = 0;
++    while (focusMinutesOn(cursor) > 0) {
++      count++;
++      cursor = cursor.subtract(const Duration(days: 1));
++    }
++    return count;
++  }
++
++  // ---- Gratitude ----
++
++  void setGratitude(String text) {
++    final trimmed = text.trim();
++    if (trimmed.isEmpty) {
++      gratitude.remove(todayKey);
++    } else {
++      gratitude[todayKey] = trimmed;
++    }
++    _changed();
++  }
++
++  // ---- Water & sleep ----
++
++  int waterOn(DateTime day) => water[dayKey(day)] ?? 0;
++
++  void changeWater(int delta) {
++    final next = ((water[todayKey] ?? 0) + delta).clamp(0, 30);
++    water[todayKey] = next;
++    _changed();
++  }
++
++  double? sleepOn(DateTime day) => sleep[dayKey(day)];
++
++  void setSleep(double hours) {
++    if (sleep[todayKey] == hours) {
++      sleep.remove(todayKey);
++    } else {
++      sleep[todayKey] = hours;
++    }
++    _changed();
++  }
++
++  // ---- Checklist / recap / carry-over ----
++
++  void dismissChecklist() {
++    checklistDismissed = true;
++    _changed();
++  }
++
++  /// Monday of the current week, as a day key.
++  String get thisWeekKey {
++    final now = DateTime.now();
++    final today = DateTime(now.year, now.month, now.day);
++    return dayKey(today.subtract(Duration(days: today.weekday - 1)));
++  }
++
++  void dismissRecap() {
++    recapDismissedWeek = thisWeekKey;
++    _changed();
++  }
++
++  void markCarriedOver() {
++    carriedOverOn = todayKey;
++    _changed();
++  }
++}
++
++final Extras extras = Extras();
+diff --git a/lib/widgets/boosters.dart b/lib/widgets/boosters.dart
+new file mode 100644
+index 0000000..57f6d6e
+--- /dev/null
++++ b/lib/widgets/boosters.dart
+@@ -0,0 +1,1166 @@
++import 'dart:async';
++
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show HapticFeedback;
++
++import '../models.dart';
++import '../services/extras.dart';
++import '../store.dart';
++import '../theme.dart';
++import 'common.dart';
++
++// Lightweight "boost" cards added to the home sections: a focus timer, top-3
++// priorities, habit insights, a money snapshot, quick health logging,
++// gratitude, a daily reach-out nudge, repeat-meal, a first-week checklist and
++// a weekly recap. Every card listens to both the main store and the small
++// extras store, so it updates the instant anything changes.
++
++class _Live extends StatelessWidget {
++  final Widget Function(BuildContext context, bool dark) builder;
++  const _Live(this.builder);
++
++  @override
++  Widget build(BuildContext context) {
++    return AnimatedBuilder(
++      animation: Listenable.merge(<Listenable>[store, extras]),
++      builder: (context, _) =>
++          builder(context, Theme.of(context).brightness == Brightness.dark),
++    );
++  }
++}
++
++class BoosterHeader extends StatelessWidget {
++  final IconData icon;
++  final String title;
++  final String? subtitle;
++  final Widget? trailing;
++  const BoosterHeader({
++    super.key,
++    required this.icon,
++    required this.title,
++    this.subtitle,
++    this.trailing,
++  });
++
++  @override
++  Widget build(BuildContext context) {
++    final dark = Theme.of(context).brightness == Brightness.dark;
++    return Row(
++      crossAxisAlignment: CrossAxisAlignment.start,
++      children: [
++        Icon(icon, size: 20, color: Surfaces.accent(dark)),
++        const SizedBox(width: 10),
++        Expanded(
++          child: Column(
++            crossAxisAlignment: CrossAxisAlignment.start,
++            children: [
++              Text(title,
++                  style: body(16, Surfaces.heading(dark), weight: FontWeight.w700)),
++              if (subtitle != null)
++                Padding(
++                  padding: const EdgeInsets.only(top: 2),
++                  child: Text(subtitle!, style: body(12, Surfaces.muted(dark))),
++                ),
++            ],
++          ),
++        ),
++        if (trailing != null) trailing!,
++      ],
++    );
++  }
++}
++
++DateTime _today() {
++  final n = DateTime.now();
++  return DateTime(n.year, n.month, n.day);
++}
++
++DateTime _daysAgo(int n) => _today().subtract(Duration(days: n));
++
++const List<String> _weekLetters = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
++
++// ---------------------------------------------------------------------------
++// Productivity
++// ---------------------------------------------------------------------------
++
++class TopThreeCard extends StatelessWidget {
++  final VoidCallback onAdd;
++  const TopThreeCard({super.key, required this.onAdd});
++
++  @override
++  Widget build(BuildContext context) {
++    return _Live((context, dark) {
++      final tasks = store.todaysTasks;
++      final openIndexes = <int>[];
++      for (var i = 0; i < tasks.length; i++) {
++        if (!tasks[i].done) openIndexes.add(i);
++      }
++      final top = openIndexes.take(3).toList();
++      final doneCount = tasks.where((t) => t.done).length;
++
++      final existing = tasks.map((t) => t.title).toSet();
++      final carry = store
++          .tasksFor(_daysAgo(1))
++          .where((t) => !t.done && !existing.contains(t.title))
++          .toList();
++      final canCarry = extras.carriedOverOn != extras.todayKey && carry.isNotEmpty;
++
++      String subtitle;
++      if (tasks.isEmpty) {
++        subtitle = 'Pick the few things that would make today a win.';
++      } else if (top.isEmpty) {
++        subtitle = 'Everything is done. Enjoy the win.';
++      } else {
++        subtitle = '$doneCount of ${tasks.length} done today';
++      }
++
++      return Column(
++        crossAxisAlignment: CrossAxisAlignment.start,
++        children: [
++          BoosterHeader(
++            icon: Icons.bolt_rounded,
++            title: 'Top 3 for today',
++            subtitle: subtitle,
++          ),
++          const SizedBox(height: 12),
++          for (final index in top)
++            Padding(
++              padding: const EdgeInsets.only(bottom: 10),
++              child: Row(
++                children: [
++                  CheckSquare(
++                    checked: false,
++                    onTap: () {
++                      HapticFeedback.selectionClick();
++                      store.toggleTask(index);
++                    },
++                  ),
++                  const SizedBox(width: 12),
++                  Expanded(
++                    child: Text(tasks[index].title,
++                        maxLines: 2,
++                        overflow: TextOverflow.ellipsis,
++                        style: body(14.5, Surfaces.bodyText(dark),
++                            weight: FontWeight.w600)),
++                  ),
++                ],
++              ),
++            ),
++          if (canCarry)
++            Padding(
++              padding: const EdgeInsets.only(bottom: 6),
++              child: Wrap(
++                spacing: 8,
++                runSpacing: 4,
++                children: [
++                  ActionChip(
++                    avatar: const Icon(Icons.redo_rounded, size: 16),
++                    label: Text('Carry over ${carry.length} from yesterday'),
++                    onPressed: () async {
++                      for (final t in carry.reversed) {
++                        await store.addTask(t.title);
++                      }
++                      extras.markCarriedOver();
++                    },
++                  ),
++                  TextButton(
++                    onPressed: extras.markCarriedOver,
++                    child: const Text('Skip'),
++                  ),
++                ],
++              ),
++            ),
++          Align(
++            alignment: Alignment.centerLeft,
++            child: OutlinedButton.icon(
++              onPressed: onAdd,
++              icon: const Icon(Icons.add, size: 18),
++              label: Text(tasks.isEmpty ? 'Add your priorities' : 'Open full to-do list'),
++            ),
++          ),
++        ],
++      );
++    });
++  }
++}
++
++class FocusTimerCard extends StatefulWidget {
++  const FocusTimerCard({super.key});
++
++  @override
++  State<FocusTimerCard> createState() => _FocusTimerCardState();
++}
++
++class _FocusTimerCardState extends State<FocusTimerCard> {
++  static const List<int> _lengths = [15, 25, 45];
++  int _minutes = 25;
++  int _remaining = 25 * 60;
++  DateTime? _endsAt;
++  Timer? _timer;
++
++  bool get _running => _endsAt != null;
++
++  @override
++  void dispose() {
++    _timer?.cancel();
++    super.dispose();
++  }
++
++  void _pick(int minutes) {
++    if (_running) return;
++    setState(() {
++      _minutes = minutes;
++      _remaining = minutes * 60;
++    });
++  }
++
++  void _start() {
++    HapticFeedback.mediumImpact();
++    setState(() {
++      _endsAt = DateTime.now().add(Duration(seconds: _remaining));
++    });
++    _timer?.cancel();
++    _timer = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
++  }
++
++  void _tick() {
++    final end = _endsAt;
++    if (end == null) return;
++    final ms = end.difference(DateTime.now()).inMilliseconds;
++    if (ms <= 0) {
++      _finish();
++    } else if (mounted) {
++      setState(() => _remaining = (ms / 1000).ceil());
++    }
++  }
++
++  void _finish() {
++    _timer?.cancel();
++    _timer = null;
++    _endsAt = null;
++    extras.addFocusMinutes(_minutes);
++    HapticFeedback.heavyImpact();
++    if (mounted) {
++      setState(() => _remaining = _minutes * 60);
++      ScaffoldMessenger.of(context)
++        ..hideCurrentSnackBar()
++        ..showSnackBar(SnackBar(
++          behavior: SnackBarBehavior.floating,
++          content: Text('Focus session complete: $_minutes minutes. Take a short break.'),
++        ));
++    }
++  }
++
++  void _stop() {
++    _timer?.cancel();
++    _timer = null;
++    setState(() {
++      _endsAt = null;
++      _remaining = _minutes * 60;
++    });
++  }
++
++  String get _clock {
++    final m = (_remaining ~/ 60).toString().padLeft(2, '0');
++    final s = (_remaining % 60).toString().padLeft(2, '0');
++    return '$m:$s';
++  }
++
++  @override
++  Widget build(BuildContext context) {
++    return _Live((context, dark) {
++      final progress = 1 - (_remaining / (_minutes * 60));
++      final streak = extras.focusStreak;
++      final todayMinutes = extras.focusMinutesOn(DateTime.now());
++      return Column(
++        crossAxisAlignment: CrossAxisAlignment.start,
++        children: [
++          BoosterHeader(
++            icon: Icons.timer_outlined,
++            title: 'Focus timer',
++            subtitle: todayMinutes == 0
++                ? 'One distraction-free block. Start small.'
++                : '$todayMinutes min focused today'
++                    '${streak > 0 ? ' · $streak-day streak' : ''}',
++          ),
++          const SizedBox(height: 14),
++          Center(
++            child: Text(_clock,
++                style: display(40, Surfaces.heading(dark))),
++          ),
++          const SizedBox(height: 10),
++          ClipRRect(
++            borderRadius: BorderRadius.circular(4),
++            child: LinearProgressIndicator(
++              value: _running ? progress.clamp(0.0, 1.0).toDouble() : 0,
++              minHeight: 6,
++              backgroundColor: Surfaces.accent(dark).withValues(alpha: 0.14),
++              valueColor: AlwaysStoppedAnimation<Color>(Surfaces.accent(dark)),
++            ),
++          ),
++          const SizedBox(height: 12),
++          Row(
++            children: [
++              for (final m in _lengths)
++                Padding(
++                  padding: const EdgeInsets.only(right: 8),
++                  child: ChoiceChip(
++                    label: Text('$m min'),
++                    selected: _minutes == m,
++                    onSelected: _running ? null : (_) => _pick(m),
++                  ),
++                ),
++              const Spacer(),
++              FilledButton(
++                onPressed: _running ? _stop : _start,
++                child: Text(_running ? 'Stop' : 'Start'),
++              ),
++            ],
++          ),
++        ],
++      );
++    });
++  }
++}
++
++int _longestRun(Iterable<String> keys) {
++  final days = <int>[];
++  for (final k in keys) {
++    final p = k.split('-');
++    if (p.length != 3) continue;
++    final y = int.tryParse(p[0]);
++    final m = int.tryParse(p[1]);
++    final d = int.tryParse(p[2]);
++    if (y == null || m == null || d == null) continue;
++    days.add(DateTime.utc(y, m, d).millisecondsSinceEpoch ~/ 86400000);
++  }
++  days.sort();
++  var best = 0;
++  var run = 0;
++  int? prev;
++  for (final d in days) {
++    if (prev != null && d == prev) continue;
++    if (prev != null && d == prev + 1) {
++      run++;
++    } else {
++      run = 1;
++    }
++    if (run > best) best = run;
++    prev = d;
++  }
++  return best;
++}
++
++class HabitInsightsCard extends StatelessWidget {
++  const HabitInsightsCard({super.key});
++
++  @override
++  Widget build(BuildContext context) {
++    return _Live((context, dark) {
++      final habits = store.habits;
++      if (habits.isEmpty) {
++        return Column(
++          crossAxisAlignment: CrossAxisAlignment.start,
++          children: [
++            const BoosterHeader(icon: Icons.insights_outlined, title: 'Habit insights'),
++            const SizedBox(height: 8),
++            Text('Add a habit above and your 5-week map and best streak appear here.',
++                style: body(12.5, Surfaces.muted(dark))),
++          ],
++        );
++      }
++      var best = 0;
++      for (final h in habits) {
++        final run = _longestRun(h.completedDays);
++        if (run > best) best = run;
++      }
++      final today = _today();
++      var done30 = 0;
++      for (final h in habits) {
++        done30 += h.completionsInLast(30, today);
++      }
++      final pct30 = (done30 * 100 / (habits.length * 30)).round();
++
++      final yesterday = _daysAgo(1);
++      final doneYesterday = habits.where((h) => h.isDoneOn(yesterday)).length;
++      final doneToday = habits.where((h) => h.isDoneOn(today)).length;
++      final everDone = habits.any((h) => h.completedDays.isNotEmpty);
++      String? nudge;
++      if (doneToday == habits.length) {
++        nudge = 'Every habit done today. That is how identity is built.';
++      } else if (doneYesterday == 0 && doneToday == 0 && everDone) {
++        nudge = 'Missed yesterday? That is okay. Never miss twice: one small habit today keeps the chain alive.';
++      }
++
++      return Column(
++        crossAxisAlignment: CrossAxisAlignment.start,
++        children: [
++          BoosterHeader(
++            icon: Icons.insights_outlined,
++            title: 'Habit insights',
++            subtitle: 'Best streak $best ${best == 1 ? 'day' : 'days'} · $pct30% in the last 30 days',
++          ),
++          const SizedBox(height: 12),
++          for (var row = 0; row < 5; row++)
++            Row(
++              children: [
++                for (var col = 0; col < 7; col++)
++                  Expanded(
++                    child: Padding(
++                      padding: const EdgeInsets.all(2),
++                      child: _HeatCell(
++                        daysAgo: 34 - (row * 7 + col),
++                        habits: habits,
++                        dark: dark,
++                      ),
++                    ),
++                  ),
++              ],
++            ),
++          const SizedBox(height: 6),
++          Text('Last 5 weeks. Darker means more habits done that day.',
++              style: body(11, Surfaces.muted(dark))),
++          if (nudge != null) ...[
++            const SizedBox(height: 10),
++            Text(nudge,
++                style: body(12.5, Surfaces.accentText(dark), weight: FontWeight.w600)),
++          ],
++        ],
++      );
++    });
++  }
++}
++
++class _HeatCell extends StatelessWidget {
++  final int daysAgo;
++  final List<Habit> habits;
++  final bool dark;
++  const _HeatCell({required this.daysAgo, required this.habits, required this.dark});
++
++  @override
++  Widget build(BuildContext context) {
++    final date = _daysAgo(daysAgo);
++    final done = habits.where((h) => h.isDoneOn(date)).length;
++    final ratio = habits.isEmpty ? 0.0 : done / habits.length;
++    return AspectRatio(
++      aspectRatio: 1,
++      child: Container(
++        decoration: BoxDecoration(
++          color: ratio == 0
++              ? Surfaces.muted(dark).withValues(alpha: 0.12)
++              : Surfaces.accent(dark).withValues(alpha: 0.25 + 0.75 * ratio),
++          borderRadius: BorderRadius.circular(6),
++          border: daysAgo == 0
++              ? Border.all(color: Surfaces.accent(dark), width: 1.5)
++              : null,
++        ),
++      ),
++    );
++  }
++}
++
++// ---------------------------------------------------------------------------
++// Finance
++// ---------------------------------------------------------------------------
++
++class MoneySnapshotCard extends StatelessWidget {
++  final VoidCallback onOpenWallet;
++  const MoneySnapshotCard({super.key, required this.onOpenWallet});
++
++  @override
++  Widget build(BuildContext context) {
++    return _Live((context, dark) {
++      final budget = store.spendBudgetAmount ?? 0.0;
++      final spent = store.spentInCurrentBudgetPeriod;
++      final hasBudget = budget > 0;
++      final ratio = hasBudget ? spent / budget : 0.0;
++      final over = ratio > 1;
++
++      final roadmap = store.financeRoadmap;
++      final target = roadmap?.targetAmount ?? 0.0;
++      final saved = store.totalSavings;
++      final fill = target > 0 ? (saved / target).clamp(0.0, 1.0).toDouble() : 0.0;
++
++      final categories = store.spendCategories.take(8).toList();
++
++      return Column(
++        crossAxisAlignment: CrossAxisAlignment.start,
++        children: [
++          const BoosterHeader(icon: Icons.account_balance_wallet_outlined, title: 'Money snapshot'),
++          const SizedBox(height: 14),
++          Row(
++            crossAxisAlignment: CrossAxisAlignment.center,
++            children: [
++              SizedBox(
++                width: 84,
++                height: 84,
++                child: Stack(
++                  alignment: Alignment.center,
++                  children: [
++                    SizedBox(
++                      width: 84,
++                      height: 84,
++                      child: CircularProgressIndicator(
++                        value: hasBudget ? ratio.clamp(0.0, 1.0).toDouble() : 0,
++                        strokeWidth: 9,
++                        backgroundColor: Surfaces.accent(dark).withValues(alpha: 0.14),
++                        valueColor: AlwaysStoppedAnimation<Color>(
++                            over ? Colors.redAccent : Surfaces.accent(dark)),
++                      ),
++                    ),
++                    Text(hasBudget ? '${(ratio * 100).round()}%' : '--',
++                        style: body(15, Surfaces.heading(dark), weight: FontWeight.w800)),
++                  ],
++                ),
++              ),
++              const SizedBox(width: 14),
++              Expanded(
++                child: Column(
++                  crossAxisAlignment: CrossAxisAlignment.start,
++                  children: [
++                    Text(
++                        hasBudget
++                            ? '${store.spendBudgetPeriod == 'weekly' ? 'Weekly' : 'Monthly'} budget'
++                            : 'No budget yet',
++                        style: body(13.5, Surfaces.heading(dark), weight: FontWeight.w700)),
++                    const SizedBox(height: 2),
++                    Text(
++                        hasBudget
++                            ? '₹${spent.toStringAsFixed(0)} of ₹${budget.toStringAsFixed(0)}'
++                                '${over ? ' (over)' : ''}'
++                            : 'Set one in the wallet to see this ring fill.',
++                        style: body(12, Surfaces.muted(dark))),
++                  ],
++                ),
++              ),
++              const SizedBox(width: 12),
++              Container(
++                width: 16,
++                height: 84,
++                decoration: BoxDecoration(
++                  color: Surfaces.accent(dark).withValues(alpha: 0.14),
++                  borderRadius: BorderRadius.circular(8),
++                ),
++                child: Align(
++                  alignment: Alignment.bottomCenter,
++                  child: FractionallySizedBox(
++                    heightFactor: fill,
++                    child: Container(
++                      decoration: BoxDecoration(
++                        color: Surfaces.accent(dark),
++                        borderRadius: BorderRadius.circular(8),
++                      ),
++                    ),
++                  ),
++                ),
++              ),
++              const SizedBox(width: 8),
++              SizedBox(
++                width: 70,
++                child: Column(
++                  crossAxisAlignment: CrossAxisAlignment.start,
++                  children: [
++                    Text('Saved', style: body(11, Surfaces.muted(dark))),
++                    Text('₹${saved.toStringAsFixed(0)}',
++                        style: body(13, Surfaces.heading(dark), weight: FontWeight.w800)),
++                    if (target > 0)
++                      Text('of ₹${target.toStringAsFixed(0)}',
++                          style: body(10.5, Surfaces.muted(dark))),
++                  ],
++                ),
++              ),
++            ],
++          ),
++          const SizedBox(height: 16),
++          Text('QUICK ADD AN EXPENSE', style: label(Surfaces.muted(dark))),
++          const SizedBox(height: 8),
++          if (categories.isEmpty)
++            Text('Add a spending category in the wallet and it appears here as a one-tap chip.',
++                style: body(12, Surfaces.muted(dark)))
++          else
++            Wrap(
++              spacing: 8,
++              runSpacing: 4,
++              children: [
++                for (final c in categories)
++                  ActionChip(
++                    label: Text(c.name),
++                    onPressed: () => _quickExpense(context, c),
++                  ),
++              ],
++            ),
++          const SizedBox(height: 8),
++          TextButton(onPressed: onOpenWallet, child: const Text('Open wallet')),
++        ],
++      );
++    });
++  }
++
++  Future<void> _quickExpense(BuildContext context, SpendCategory cat) async {
++    final controller = TextEditingController();
++    var isNeed = true;
++    await showModalBottomSheet<void>(
++      context: context,
++      isScrollControlled: true,
++      builder: (ctx) {
++        return StatefulBuilder(builder: (ctx, setSheet) {
++          final dark = Theme.of(ctx).brightness == Brightness.dark;
++          return Padding(
++            padding: EdgeInsets.fromLTRB(
++                20, 20, 20, 20 + MediaQuery.of(ctx).viewInsets.bottom),
++            child: Column(
++              mainAxisSize: MainAxisSize.min,
++              crossAxisAlignment: CrossAxisAlignment.start,
++              children: [
++                Text('Add to ${cat.name}',
++                    style: body(16, Surfaces.heading(dark), weight: FontWeight.w700)),
++                const SizedBox(height: 12),
++                TextField(
++                  controller: controller,
++                  autofocus: true,
++                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
++                  decoration: const InputDecoration(prefixText: '₹ ', hintText: 'Amount'),
++                ),
++                const SizedBox(height: 12),
++                Row(
++                  children: [
++                    ChoiceChip(
++                      label: const Text('Need'),
++                      selected: isNeed,
++                      onSelected: (_) => setSheet(() => isNeed = true),
++                    ),
++                    const SizedBox(width: 8),
++                    ChoiceChip(
++                      label: const Text('Want'),
++                      selected: !isNeed,
++                      onSelected: (_) => setSheet(() => isNeed = false),
++                    ),
++                  ],
++                ),
++                const SizedBox(height: 16),
++                GoldButton(
++                  labelText: 'Save',
++                  onPressed: () async {
++                    final value = double.tryParse(controller.text.trim());
++                    if (value == null || value <= 0) return;
++                    await store.addSpendEntry(
++                        categoryId: cat.id, amount: value, isNeed: isNeed);
++                    if (ctx.mounted) Navigator.of(ctx).pop();
++                  },
++                ),
++              ],
++            ),
++          );
++        });
++      },
++    );
++    if (context.mounted) toastSaved(context);
++  }
++}
++
++// ---------------------------------------------------------------------------
++// Health
++// ---------------------------------------------------------------------------
++
++class HealthQuickLogCard extends StatelessWidget {
++  const HealthQuickLogCard({super.key});
++
++  static const int _waterGoal = 8;
++
++  @override
++  Widget build(BuildContext context) {
++    return _Live((context, dark) {
++      final today = _today();
++      final glasses = extras.waterOn(today);
++      final sleptToday = extras.sleepOn(today);
++
++      final sleepValues = <double>[];
++      for (var i = 0; i < 7; i++) {
++        final v = extras.sleepOn(_daysAgo(i));
++        if (v != null) sleepValues.add(v);
++      }
++      final avgSleep = sleepValues.isEmpty
++          ? null
++          : sleepValues.fold<double>(0, (a, b) => a + b) / sleepValues.length;
++
++      return Column(
++        crossAxisAlignment: CrossAxisAlignment.start,
++        children: [
++          BoosterHeader(
++            icon: Icons.water_drop_outlined,
++            title: 'Water and sleep',
++            subtitle: avgSleep == null
++                ? 'Two quick taps a day show your trend.'
++                : 'Average sleep this week: ${avgSleep.toStringAsFixed(1)} h',
++          ),
++          const SizedBox(height: 12),
++          Row(
++            children: [
++              IconButton(
++                onPressed: glasses > 0 ? () => extras.changeWater(-1) : null,
++                icon: const Icon(Icons.remove_circle_outline),
++              ),
++              Expanded(
++                child: Column(
++                  children: [
++                    Text('$glasses / $_waterGoal glasses',
++                        style: body(14, Surfaces.heading(dark), weight: FontWeight.w700)),
++                    const SizedBox(height: 6),
++                    ClipRRect(
++                      borderRadius: BorderRadius.circular(4),
++                      child: LinearProgressIndicator(
++                        value: (glasses / _waterGoal).clamp(0.0, 1.0).toDouble(),
++                        minHeight: 6,
++                        backgroundColor: Surfaces.accent(dark).withValues(alpha: 0.14),
++                        valueColor: AlwaysStoppedAnimation<Color>(Surfaces.accent(dark)),
++                      ),
++                    ),
++                  ],
++                ),
++              ),
++              IconButton(
++                onPressed: () {
++                  HapticFeedback.selectionClick();
++                  extras.changeWater(1);
++                },
++                icon: Icon(Icons.add_circle, color: Surfaces.accent(dark)),
++              ),
++            ],
++          ),
++          const SizedBox(height: 10),
++          Text('HOURS SLEPT LAST NIGHT', style: label(Surfaces.muted(dark))),
++          const SizedBox(height: 6),
++          Wrap(
++            spacing: 8,
++            children: [
++              for (final h in const [5, 6, 7, 8, 9])
++                ChoiceChip(
++                  label: Text('$h h'),
++                  selected: sleptToday == h.toDouble(),
++                  onSelected: (_) => extras.setSleep(h.toDouble()),
++                ),
++            ],
++          ),
++          const SizedBox(height: 14),
++          Text('WATER, LAST 7 DAYS', style: label(Surfaces.muted(dark))),
++          const SizedBox(height: 8),
++          SizedBox(
++            height: 52,
++            child: Row(
++              crossAxisAlignment: CrossAxisAlignment.end,
++              children: [
++                for (var i = 6; i >= 0; i--)
++                  Expanded(
++                    child: Padding(
++                      padding: const EdgeInsets.symmetric(horizontal: 5),
++                      child: Container(
++                        height: 4 +
++                            44 * (extras.waterOn(_daysAgo(i)) / _waterGoal).clamp(0.0, 1.0).toDouble(),
++                        decoration: BoxDecoration(
++                          color: extras.waterOn(_daysAgo(i)) >= _waterGoal
++                              ? Surfaces.accent(dark)
++                              : Surfaces.accent(dark).withValues(alpha: 0.4),
++                          borderRadius: BorderRadius.circular(4),
++                        ),
++                      ),
++                    ),
++                  ),
++              ],
++            ),
++          ),
++          const SizedBox(height: 4),
++          Row(
++            children: [
++              for (var i = 6; i >= 0; i--)
++                Expanded(
++                  child: Center(
++                    child: Text(_weekLetters[_daysAgo(i).weekday - 1],
++                        style: body(10.5, Surfaces.muted(dark))),
++                  ),
++                ),
++            ],
++          ),
++        ],
++      );
++    });
++  }
++}
++
++// ---------------------------------------------------------------------------
++// Mindset
++// ---------------------------------------------------------------------------
++
++class GratitudeCard extends StatefulWidget {
++  const GratitudeCard({super.key});
++
++  @override
++  State<GratitudeCard> createState() => _GratitudeCardState();
++}
++
++class _GratitudeCardState extends State<GratitudeCard> {
++  late final TextEditingController _controller;
++
++  @override
++  void initState() {
++    super.initState();
++    _controller = TextEditingController(text: extras.gratitude[extras.todayKey] ?? '');
++  }
++
++  @override
++  void dispose() {
++    _controller.dispose();
++    super.dispose();
++  }
++
++  void _save() {
++    extras.setGratitude(_controller.text);
++    FocusScope.of(context).unfocus();
++    toastSaved(context);
++  }
++
++  @override
++  Widget build(BuildContext context) {
++    return _Live((context, dark) {
++      final past = extras.gratitude.keys
++          .where((k) => k != extras.todayKey)
++          .toList()
++        ..sort((a, b) => b.compareTo(a));
++      final saved = extras.gratitude[extras.todayKey];
++      return Column(
++        crossAxisAlignment: CrossAxisAlignment.start,
++        children: [
++          BoosterHeader(
++            icon: Icons.favorite_border,
++            title: 'One good thing today',
++            subtitle: saved == null ? 'One line is enough.' : 'Saved. You can edit it any time.',
++          ),
++          const SizedBox(height: 10),
++          Row(
++            children: [
++              Expanded(
++                child: TextField(
++                  controller: _controller,
++                  textCapitalization: TextCapitalization.sentences,
++                  onSubmitted: (_) => _save(),
++                  style: body(14.5, Surfaces.bodyText(dark), weight: FontWeight.w500),
++                  decoration: InputDecoration(
++                    hintText: 'I am grateful for...',
++                    hintStyle: body(14, Surfaces.muted(dark)),
++                  ),
++                ),
++              ),
++              IconButton(
++                onPressed: _save,
++                icon: Icon(Icons.check_circle, color: Surfaces.accent(dark), size: 30),
++              ),
++            ],
++          ),
++          if (past.isNotEmpty) ...[
++            const SizedBox(height: 12),
++            Text('EARLIER', style: label(Surfaces.muted(dark))),
++            const SizedBox(height: 6),
++            for (final k in past.take(3))
++              Padding(
++                padding: const EdgeInsets.only(bottom: 4),
++                child: Text('${k.substring(5)}  ·  ${extras.gratitude[k]}',
++                    maxLines: 2,
++                    overflow: TextOverflow.ellipsis,
++                    style: body(12.5, Surfaces.bodyText(dark))),
++              ),
++          ],
++        ],
++      );
++    });
++  }
++}
++
++// ---------------------------------------------------------------------------
++// Relationships
++// ---------------------------------------------------------------------------
++
++class ReachOutCard extends StatelessWidget {
++  const ReachOutCard({super.key});
++
++  @override
++  Widget build(BuildContext context) {
++    return _Live((context, dark) {
++      final contacts = store.relationshipContacts;
++      if (contacts.isEmpty) {
++        return Column(
++          crossAxisAlignment: CrossAxisAlignment.start,
++          children: [
++            const BoosterHeader(icon: Icons.waving_hand_outlined, title: 'Reach out today'),
++            const SizedBox(height: 8),
++            Text('Add someone you care about below. Each day you will get a gentle nudge for whoever you have not spoken to in a while.',
++                style: body(12.5, Surfaces.muted(dark))),
++          ],
++        );
++      }
++      int daysSince(RelationshipContact c) => c.lastContactAt == null
++          ? 100000
++          : DateTime.now().difference(c.lastContactAt!).inDays;
++      final sorted = List<RelationshipContact>.from(contacts)
++        ..sort((a, b) => (daysSince(b) - b.cadenceDays).compareTo(daysSince(a) - a.cadenceDays));
++      final pick = sorted.first;
++      if (!pick.isOverdue) {
++        return Column(
++          crossAxisAlignment: CrossAxisAlignment.start,
++          children: [
++            const BoosterHeader(icon: Icons.waving_hand_outlined, title: 'Reach out today'),
++            const SizedBox(height: 8),
++            Text('You are all caught up with everyone. Lovely.',
++                style: body(13, Surfaces.bodyText(dark))),
++          ],
++        );
++      }
++      final since = daysSince(pick);
++      return Column(
++        crossAxisAlignment: CrossAxisAlignment.start,
++        children: [
++          const BoosterHeader(icon: Icons.waving_hand_outlined, title: 'Reach out today'),
++          const SizedBox(height: 10),
++          Text(pick.name, style: display(17, Surfaces.heading(dark))),
++          const SizedBox(height: 2),
++          Text(
++              since >= 100000
++                  ? '${pick.relation} · no check-in logged yet'
++                  : '${pick.relation} · last in touch $since ${since == 1 ? 'day' : 'days'} ago',
++              style: body(12, Surfaces.muted(dark))),
++          const SizedBox(height: 12),
++          Align(
++            alignment: Alignment.centerLeft,
++            child: FilledButton.icon(
++              onPressed: () async {
++                await store.logContactNow(pick);
++                if (context.mounted) toastSaved(context, label: 'Logged');
++              },
++              icon: const Icon(Icons.check, size: 18),
++              label: const Text('I reached out'),
++            ),
++          ),
++        ],
++      );
++    });
++  }
++}
++
++// ---------------------------------------------------------------------------
++// Nutrition
++// ---------------------------------------------------------------------------
++
++class RepeatMealCard extends StatelessWidget {
++  const RepeatMealCard({super.key});
++
++  @override
++  Widget build(BuildContext context) {
++    return _Live((context, dark) {
++      final yesterday = store.nutritionEntriesFor(_daysAgo(1));
++      final todayHasMeals = store.todaysNutritionEntries.isNotEmpty;
++      return Column(
++        crossAxisAlignment: CrossAxisAlignment.start,
++        children: [
++          const BoosterHeader(icon: Icons.replay_rounded, title: 'Repeat yesterday'),
++          const SizedBox(height: 8),
++          if (yesterday.isEmpty)
++            Text('Log a few meals today. Tomorrow you can repeat them in one tap.',
++                style: body(12.5, Surfaces.muted(dark)))
++          else ...[
++            Text(yesterday.map((e) => e.name).join(' · '),
++                maxLines: 3,
++                overflow: TextOverflow.ellipsis,
++                style: body(12.5, Surfaces.bodyText(dark))),
++            const SizedBox(height: 10),
++            Align(
++              alignment: Alignment.centerLeft,
++              child: FilledButton.icon(
++                onPressed: todayHasMeals
++                    ? null
++                    : () async {
++                        for (final e in yesterday.reversed) {
++                          await store.addNutritionEntry(e.mealType, e.name, note: e.note);
++                        }
++                        if (context.mounted) toastSaved(context);
++                      },
++                icon: const Icon(Icons.replay_rounded, size: 18),
++                label: Text(todayHasMeals
++                    ? 'Today already has meals'
++                    : 'Repeat ${yesterday.length} ${yesterday.length == 1 ? 'meal' : 'meals'}'),
++              ),
++            ),
++          ],
++        ],
++      );
++    });
++  }
++}
++
++// ---------------------------------------------------------------------------
++// Dashboard
++// ---------------------------------------------------------------------------
++
++class FirstWeekChecklist extends StatelessWidget {
++  final VoidCallback onOpenProductivity;
++  final VoidCallback onOpenReminders;
++  const FirstWeekChecklist({
++    super.key,
++    required this.onOpenProductivity,
++    required this.onOpenReminders,
++  });
++
++  @override
++  Widget build(BuildContext context) {
++    return _Live((context, dark) {
++      if (extras.checklistDismissed) return const SizedBox.shrink();
++      final hasHabit = store.habits.isNotEmpty;
++      final hasReminder = store.reminders.any((r) => r.enabled);
++      final hasTask = store.state.tasksByDay.values.any((l) => l.isNotEmpty);
++      final hasFocus = extras.totalFocusMinutes > 0;
++      final items = <(bool, String, VoidCallback)>[
++        (hasHabit, 'Add your first habit', onOpenProductivity),
++        (hasTask, 'Write one to-do for today', onOpenProductivity),
++        (hasReminder, 'Turn on a reminder', onOpenReminders),
++        (hasFocus, 'Finish one focus session', onOpenProductivity),
++      ];
++      final doneCount = items.where((i) => i.$1).length;
++      final all = doneCount == items.length;
++      return Padding(
++        padding: const EdgeInsets.only(top: 14),
++        child: ModuleCard(
++          accent: true,
++          child: Column(
++            crossAxisAlignment: CrossAxisAlignment.start,
++            children: [
++              BoosterHeader(
++                icon: Icons.flag_outlined,
++                title: all ? 'You are set up' : 'Get started',
++                subtitle: '$doneCount of ${items.length} done',
++                trailing: IconButton(
++                  visualDensity: VisualDensity.compact,
++                  onPressed: extras.dismissChecklist,
++                  icon: Icon(Icons.close, size: 18, color: Surfaces.muted(dark)),
++                ),
++              ),
++              const SizedBox(height: 10),
++              for (final item in items)
++                InkWell(
++                  onTap: item.$1 ? null : item.$3,
++                  child: Padding(
++                    padding: const EdgeInsets.symmetric(vertical: 6),
++                    child: Row(
++                      children: [
++                        Icon(
++                          item.$1 ? Icons.check_circle : Icons.radio_button_unchecked,
++                          size: 20,
++                          color: item.$1 ? Surfaces.accent(dark) : Surfaces.muted(dark),
++                        ),
++                        const SizedBox(width: 10),
++                        Expanded(
++                          child: Text(item.$2,
++                              style: body(13.5, Surfaces.bodyText(dark),
++                                      weight: FontWeight.w600)
++                                  .copyWith(
++                                      decoration: item.$1
++                                          ? TextDecoration.lineThrough
++                                          : TextDecoration.none)),
++                        ),
++                      ],
++                    ),
++                  ),
++                ),
++            ],
++          ),
++        ),
++      );
++    });
++  }
++}
++
++class WeeklyRecapCard extends StatelessWidget {
++  const WeeklyRecapCard({super.key});
++
++  @override
++  Widget build(BuildContext context) {
++    return _Live((context, dark) {
++      if (extras.recapDismissedWeek == extras.thisWeekKey) {
++        return const SizedBox.shrink();
++      }
++      final habits = store.habits;
++      var habitDone = 0;
++      for (final h in habits) {
++        habitDone += h.completionsInLast(7, _today());
++      }
++      var tasksDone = 0;
++      var focus = 0;
++      for (var i = 0; i < 7; i++) {
++        tasksDone += store.tasksFor(_daysAgo(i)).where((t) => t.done).length;
++        focus += extras.focusMinutesOn(_daysAgo(i));
++      }
++      final spent = store.spentThisWeek;
++      final goals = store.weeklyGoals;
++      final goalsDone = goals.where((g) => g.done).length;
++      if (habits.isEmpty && tasksDone == 0 && focus == 0 && spent == 0 && goals.isEmpty) {
++        return const SizedBox.shrink();
++      }
++      final stats = <(String, String)>[
++        ('Habits', habits.isEmpty ? '--' : '$habitDone/${habits.length * 7}'),
++        ('To-dos done', '$tasksDone'),
++        ('Focus', '$focus min'),
++        ('Spent', '₹${spent.toStringAsFixed(0)}'),
++        ('Weekly goals', goals.isEmpty ? '--' : '$goalsDone/${goals.length}'),
++      ];
++      return Padding(
++        padding: const EdgeInsets.only(top: 14),
++        child: ModuleCard(
++          child: Column(
++            crossAxisAlignment: CrossAxisAlignment.start,
++            children: [
++              BoosterHeader(
++                icon: Icons.bar_chart_rounded,
++                title: 'Your last 7 days',
++                subtitle: goals.isEmpty
++                    ? 'Set one weekly goal to anchor next week.'
++                    : 'Check in: what is the one thing for this week?',
++                trailing: IconButton(
++                  visualDensity: VisualDensity.compact,
++                  onPressed: extras.dismissRecap,
++                  icon: Icon(Icons.close, size: 18, color: Surfaces.muted(dark)),
++                ),
++              ),
++              const SizedBox(height: 12),
++              Wrap(
++                spacing: 10,
++                runSpacing: 10,
++                children: [
++                  for (final s in stats)
++                    Container(
++                      width: 96,
++                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
++                      decoration: BoxDecoration(
++                        color: Surfaces.accent(dark).withValues(alpha: 0.10),
++                        borderRadius: BorderRadius.circular(14),
++                      ),
++                      child: Column(
++                        crossAxisAlignment: CrossAxisAlignment.start,
++                        children: [
++                          Text(s.$2,
++                              maxLines: 1,
++                              overflow: TextOverflow.ellipsis,
++                              style: body(15, Surfaces.heading(dark),
++                                  weight: FontWeight.w800)),
++                          const SizedBox(height: 2),
++                          Text(s.$1,
++                              maxLines: 1,
++                              overflow: TextOverflow.ellipsis,
++                              style: body(10.5, Surfaces.muted(dark))),
++                        ],
++                      ),
++                    ),
++                ],
++              ),
++            ],
++          ),
++        ),
++      );
++    });
++  }
++}
+diff --git a/test/widget_test.dart b/test/widget_test.dart
+index 554226c..eaa91d5 100644
+--- a/test/widget_test.dart
++++ b/test/widget_test.dart
+@@ -46,7 +46,7 @@ void main() {
+     // this content may not be built/visible yet — scroll the Dashboard's own
+     // list down by a fixed amount first.
+     await tester.drag(
+-        find.byKey(const ValueKey('dashboardList')), const Offset(0, -400));
++        find.byKey(const ValueKey('dashboardList')), const Offset(0, -600));
+     await tester.pumpAndSettle();
+     expect(find.text('YOUR SECTIONS'), findsOneWidget);
+     expect(find.text('Productivity'), findsWidgets);

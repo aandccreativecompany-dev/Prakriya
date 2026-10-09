@@ -112,36 +112,44 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Widget _itemFor(String id) {
+  // Every item is wrapped so it rebuilds whenever the store changes. Most of
+  // these widgets are stateless and read the global store directly; created
+  // as `const`, Flutter reuses the identical instance and never rebuilds
+  // them when data changes, which is why summaries like "All clear" stayed
+  // stale until you switched tabs or reopened the app.
+  Widget _itemFor(String id) => _LiveItem(() => _rawItemFor(id));
+
+  // ignore: prefer_const_constructors
+  Widget _rawItemFor(String id) {
     switch (id) {
       case 'priorities':
-        return const _QuickLaunchButtons();
+        return _QuickLaunchButtons();
       case 'habits':
-        return const _HabitsContent();
+        return _HabitsContent();
       case 'tips':
-        return const _TipItem();
+        return _TipItem();
       case 'progressSummary':
-        return const _ProgressSummary();
+        return _ProgressSummary();
       case 'eveningReflection':
-        return const _EveningReflectionItem();
+        return _EveningReflectionItem();
       case 'reminders':
-        return const _ReminderItem();
+        return _ReminderItem();
       case 'scripting':
-        return const _ScriptingItem();
+        return _ScriptingItem();
       case 'visionBoard':
-        return const _VisionBoardItem();
+        return _VisionBoardItem();
       case 'mindMap':
-        return const _MindMapItem();
+        return _MindMapItem();
       case 'financeGoals':
-        return const _FinanceGoalsContent();
+        return _FinanceGoalsContent();
       case 'healthGoals':
-        return const _HealthGoalsContent();
+        return _HealthGoalsContent();
       case 'mindsetGoals':
-        return const _MindsetGoalsContent();
+        return _MindsetGoalsContent();
       case 'relationshipsGoals':
-        return const _RelationshipsGoalsContent();
+        return _RelationshipsGoalsContent();
       case 'nutritionLog':
-        return const _NutritionContent();
+        return _NutritionContent();
       default:
         return const SizedBox.shrink();
     }
@@ -557,6 +565,15 @@ class _SectionScreenState extends State<_SectionScreen> {
 
 /// Small header row used by each item inside a section page — an icon,
 /// a title, and whatever trailing summary/action the item wants.
+class _LiveItem extends StatelessWidget {
+  final Widget Function() make;
+  const _LiveItem(this.make);
+
+  @override
+  Widget build(BuildContext context) =>
+      AnimatedBuilder(animation: store, builder: (_, __) => make());
+}
+
 class _ItemHeader extends StatelessWidget {
   final IconData icon;
   final String title;
@@ -624,9 +641,9 @@ class _QuickLaunchButtons extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final openTodos = store.todaysTasks.where((t) => !t.done).length;
-    final openWeekly = store.weeklyGoals.where((t) => !t.done).length;
-    final openMonthly = store.monthlyGoals.where((t) => !t.done).length;
+    final todos = store.todaysTasks;
+    final weekly = store.weeklyGoals;
+    final monthly = store.monthlyGoals;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -636,7 +653,8 @@ class _QuickLaunchButtons extends StatelessWidget {
         _QuickLaunchButton(
           icon: Icons.edit_note_rounded,
           label: "Today's to-do list",
-          summary: openTodos == 0 ? 'All clear' : '$openTodos open',
+          done: todos.where((t) => t.done).length,
+          total: todos.length,
           onTap: () => Navigator.of(context)
               .push(MaterialPageRoute(builder: (_) => const TodoListScreen())),
         ),
@@ -644,7 +662,8 @@ class _QuickLaunchButtons extends StatelessWidget {
         _QuickLaunchButton(
           icon: Icons.sports_score_rounded,
           label: 'Weekly goals',
-          summary: openWeekly == 0 ? 'All clear' : '$openWeekly open',
+          done: weekly.where((t) => t.done).length,
+          total: weekly.length,
           onTap: () => Navigator.of(context)
               .push(MaterialPageRoute(builder: (_) => const WeeklyGoalsScreen())),
         ),
@@ -652,7 +671,8 @@ class _QuickLaunchButtons extends StatelessWidget {
         _QuickLaunchButton(
           icon: Icons.calendar_month_rounded,
           label: 'Monthly goals',
-          summary: openMonthly == 0 ? 'All clear' : '$openMonthly open',
+          done: monthly.where((t) => t.done).length,
+          total: monthly.length,
           onTap: () => Navigator.of(context)
               .push(MaterialPageRoute(builder: (_) => const MonthlyGoalsScreen())),
         ),
@@ -664,14 +684,22 @@ class _QuickLaunchButtons extends StatelessWidget {
 class _QuickLaunchButton extends StatelessWidget {
   final IconData icon;
   final String label;
-  final String summary;
+  final int done;
+  final int total;
   final VoidCallback onTap;
   const _QuickLaunchButton({
     required this.icon,
     required this.label,
-    required this.summary,
+    required this.done,
+    required this.total,
     required this.onTap,
   });
+
+  String get _summary {
+    if (total == 0) return 'Nothing yet';
+    if (done == total) return 'All done $done/$total';
+    return '${total - done} open · $done done';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -687,25 +715,50 @@ class _QuickLaunchButton extends StatelessWidget {
           color: Surfaces.accent(dark).withValues(alpha: 0.10),
           border: Border.all(color: Surfaces.accent(dark).withValues(alpha: 0.3)),
         ),
-        child: Row(
+        child: Column(
           children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: Surfaces.accent(dark).withValues(alpha: 0.18),
-                shape: BoxShape.circle,
+            Row(
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: Surfaces.accent(dark).withValues(alpha: 0.18),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(icon, color: Surfaces.accent(dark), size: 18),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(label,
+                      style: body(14, Surfaces.heading(dark), weight: FontWeight.w700)),
+                ),
+                Flexible(
+                  child: Text(_summary,
+                      overflow: TextOverflow.ellipsis,
+                      style: body(11.5, Surfaces.muted(dark))),
+                ),
+                const SizedBox(width: 6),
+                Icon(Icons.chevron_right, color: Surfaces.muted(dark), size: 18),
+              ],
+            ),
+            if (total > 0) ...[
+              const SizedBox(height: 10),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: TweenAnimationBuilder<double>(
+                  tween: Tween(begin: 0, end: done / total),
+                  duration: const Duration(milliseconds: 450),
+                  curve: Curves.easeOutCubic,
+                  builder: (_, v, __) => LinearProgressIndicator(
+                    value: v,
+                    minHeight: 5,
+                    backgroundColor: Surfaces.accent(dark).withValues(alpha: 0.14),
+                    valueColor: AlwaysStoppedAnimation(Surfaces.accent(dark)),
+                  ),
+                ),
               ),
-              child: Icon(icon, color: Surfaces.accent(dark), size: 18),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(label,
-                  style: body(14, Surfaces.heading(dark), weight: FontWeight.w700)),
-            ),
-            Text(summary, style: body(11.5, Surfaces.muted(dark))),
-            const SizedBox(width: 6),
-            Icon(Icons.chevron_right, color: Surfaces.muted(dark), size: 18),
+            ],
           ],
         ),
       ),

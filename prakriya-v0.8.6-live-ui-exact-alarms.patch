@@ -1,0 +1,394 @@
+diff --git a/android_overrides/AndroidManifest.xml b/android_overrides/AndroidManifest.xml
+index 23f7b78..bd86e41 100644
+--- a/android_overrides/AndroidManifest.xml
++++ b/android_overrides/AndroidManifest.xml
+@@ -2,6 +2,7 @@
+     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+     <uses-permission android:name="android.permission.VIBRATE" />
++    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+     <uses-permission android:name="android.permission.INTERNET" />
+ 
+diff --git a/lib/notifications.dart b/lib/notifications.dart
+index 393c9ca..cea73d7 100644
+--- a/lib/notifications.dart
++++ b/lib/notifications.dart
+@@ -74,6 +74,35 @@ class Notifications {
+     return granted ?? false;
+   }
+ 
++  /// Exact alarms fire on time even in Doze; inexact ones can be deferred
++  /// for a long time (or dropped) by aggressive phone brands. Android 14+
++  /// makes the user grant this in a special-access screen.
++  Future<bool> exactAllowed() async {
++    try {
++      await init();
++      final android = _plugin.resolvePlatformSpecificImplementation<
++          AndroidFlutterLocalNotificationsPlugin>();
++      return await android?.canScheduleExactNotifications() ?? false;
++    } catch (_) {
++      return false;
++    }
++  }
++
++  Future<void> requestExact() async {
++    try {
++      await init();
++      final android = _plugin.resolvePlatformSpecificImplementation<
++          AndroidFlutterLocalNotificationsPlugin>();
++      await android?.requestExactAlarmsPermission();
++    } catch (e) {
++      debugPrint('Prakriya: exact alarm request failed: $e');
++    }
++  }
++
++  Future<AndroidScheduleMode> _mode() async => (await exactAllowed())
++      ? AndroidScheduleMode.exactAllowWhileIdle
++      : AndroidScheduleMode.inexactAllowWhileIdle;
++
+   Future<bool> permissionGranted() async {
+     await init();
+     final android = _plugin.resolvePlatformSpecificImplementation<
+@@ -128,7 +157,7 @@ class Notifications {
+       "Today's the day — ${keyDate.title}.",
+       tz.TZDateTime.from(scheduled, tz.local),
+       _details,
+-      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
++      androidScheduleMode: await _mode(),
+       uiLocalNotificationDateInterpretation:
+           UILocalNotificationDateInterpretation.absoluteTime,
+     );
+@@ -220,7 +249,7 @@ class Notifications {
+       body,
+       _nextInstance(hour, minute),
+       _details,
+-      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
++      androidScheduleMode: await _mode(),
+       uiLocalNotificationDateInterpretation:
+           UILocalNotificationDateInterpretation.absoluteTime,
+       matchDateTimeComponents: DateTimeComponents.time,
+@@ -321,7 +350,7 @@ class Notifications {
+                 'Open your wallet to see where it went this week.',
+                 _nextWeekday(DateTime.sunday, reminder.hour, reminder.minute),
+                 _details,
+-                androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
++                androidScheduleMode: await _mode(),
+                 uiLocalNotificationDateInterpretation:
+                     UILocalNotificationDateInterpretation.absoluteTime,
+                 matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
+@@ -336,7 +365,7 @@ class Notifications {
+                 'A new month just started — check last month\'s totals in your wallet.',
+                 _nextDayOfMonth(1, reminder.hour, reminder.minute),
+                 _details,
+-                androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
++                androidScheduleMode: await _mode(),
+                 uiLocalNotificationDateInterpretation:
+                     UILocalNotificationDateInterpretation.absoluteTime,
+                 matchDateTimeComponents: DateTimeComponents.dayOfMonthAndTime,
+diff --git a/lib/screens/home_screen.dart b/lib/screens/home_screen.dart
+index f74b2a4..c01ff2e 100644
+--- a/lib/screens/home_screen.dart
++++ b/lib/screens/home_screen.dart
+@@ -112,36 +112,44 @@ class _HomeScreenState extends State<HomeScreen> {
+     }
+   }
+ 
+-  Widget _itemFor(String id) {
++  // Every item is wrapped so it rebuilds whenever the store changes. Most of
++  // these widgets are stateless and read the global store directly; created
++  // as `const`, Flutter reuses the identical instance and never rebuilds
++  // them when data changes, which is why summaries like "All clear" stayed
++  // stale until you switched tabs or reopened the app.
++  Widget _itemFor(String id) => _LiveItem(() => _rawItemFor(id));
++
++  // ignore: prefer_const_constructors
++  Widget _rawItemFor(String id) {
+     switch (id) {
+       case 'priorities':
+-        return const _QuickLaunchButtons();
++        return _QuickLaunchButtons();
+       case 'habits':
+-        return const _HabitsContent();
++        return _HabitsContent();
+       case 'tips':
+-        return const _TipItem();
++        return _TipItem();
+       case 'progressSummary':
+-        return const _ProgressSummary();
++        return _ProgressSummary();
+       case 'eveningReflection':
+-        return const _EveningReflectionItem();
++        return _EveningReflectionItem();
+       case 'reminders':
+-        return const _ReminderItem();
++        return _ReminderItem();
+       case 'scripting':
+-        return const _ScriptingItem();
++        return _ScriptingItem();
+       case 'visionBoard':
+-        return const _VisionBoardItem();
++        return _VisionBoardItem();
+       case 'mindMap':
+-        return const _MindMapItem();
++        return _MindMapItem();
+       case 'financeGoals':
+-        return const _FinanceGoalsContent();
++        return _FinanceGoalsContent();
+       case 'healthGoals':
+-        return const _HealthGoalsContent();
++        return _HealthGoalsContent();
+       case 'mindsetGoals':
+-        return const _MindsetGoalsContent();
++        return _MindsetGoalsContent();
+       case 'relationshipsGoals':
+-        return const _RelationshipsGoalsContent();
++        return _RelationshipsGoalsContent();
+       case 'nutritionLog':
+-        return const _NutritionContent();
++        return _NutritionContent();
+       default:
+         return const SizedBox.shrink();
+     }
+@@ -557,6 +565,15 @@ class _SectionScreenState extends State<_SectionScreen> {
+ 
+ /// Small header row used by each item inside a section page — an icon,
+ /// a title, and whatever trailing summary/action the item wants.
++class _LiveItem extends StatelessWidget {
++  final Widget Function() make;
++  const _LiveItem(this.make);
++
++  @override
++  Widget build(BuildContext context) =>
++      AnimatedBuilder(animation: store, builder: (_, __) => make());
++}
++
+ class _ItemHeader extends StatelessWidget {
+   final IconData icon;
+   final String title;
+@@ -624,9 +641,9 @@ class _QuickLaunchButtons extends StatelessWidget {
+ 
+   @override
+   Widget build(BuildContext context) {
+-    final openTodos = store.todaysTasks.where((t) => !t.done).length;
+-    final openWeekly = store.weeklyGoals.where((t) => !t.done).length;
+-    final openMonthly = store.monthlyGoals.where((t) => !t.done).length;
++    final todos = store.todaysTasks;
++    final weekly = store.weeklyGoals;
++    final monthly = store.monthlyGoals;
+ 
+     return Column(
+       crossAxisAlignment: CrossAxisAlignment.start,
+@@ -636,7 +653,8 @@ class _QuickLaunchButtons extends StatelessWidget {
+         _QuickLaunchButton(
+           icon: Icons.edit_note_rounded,
+           label: "Today's to-do list",
+-          summary: openTodos == 0 ? 'All clear' : '$openTodos open',
++          done: todos.where((t) => t.done).length,
++          total: todos.length,
+           onTap: () => Navigator.of(context)
+               .push(MaterialPageRoute(builder: (_) => const TodoListScreen())),
+         ),
+@@ -644,7 +662,8 @@ class _QuickLaunchButtons extends StatelessWidget {
+         _QuickLaunchButton(
+           icon: Icons.sports_score_rounded,
+           label: 'Weekly goals',
+-          summary: openWeekly == 0 ? 'All clear' : '$openWeekly open',
++          done: weekly.where((t) => t.done).length,
++          total: weekly.length,
+           onTap: () => Navigator.of(context)
+               .push(MaterialPageRoute(builder: (_) => const WeeklyGoalsScreen())),
+         ),
+@@ -652,7 +671,8 @@ class _QuickLaunchButtons extends StatelessWidget {
+         _QuickLaunchButton(
+           icon: Icons.calendar_month_rounded,
+           label: 'Monthly goals',
+-          summary: openMonthly == 0 ? 'All clear' : '$openMonthly open',
++          done: monthly.where((t) => t.done).length,
++          total: monthly.length,
+           onTap: () => Navigator.of(context)
+               .push(MaterialPageRoute(builder: (_) => const MonthlyGoalsScreen())),
+         ),
+@@ -664,15 +684,23 @@ class _QuickLaunchButtons extends StatelessWidget {
+ class _QuickLaunchButton extends StatelessWidget {
+   final IconData icon;
+   final String label;
+-  final String summary;
++  final int done;
++  final int total;
+   final VoidCallback onTap;
+   const _QuickLaunchButton({
+     required this.icon,
+     required this.label,
+-    required this.summary,
++    required this.done,
++    required this.total,
+     required this.onTap,
+   });
+ 
++  String get _summary {
++    if (total == 0) return 'Nothing yet';
++    if (done == total) return 'All done $done/$total';
++    return '${total - done} open · $done done';
++  }
++
+   @override
+   Widget build(BuildContext context) {
+     final dark = Theme.of(context).brightness == Brightness.dark;
+@@ -687,25 +715,50 @@ class _QuickLaunchButton extends StatelessWidget {
+           color: Surfaces.accent(dark).withValues(alpha: 0.10),
+           border: Border.all(color: Surfaces.accent(dark).withValues(alpha: 0.3)),
+         ),
+-        child: Row(
++        child: Column(
+           children: [
+-            Container(
+-              width: 36,
+-              height: 36,
+-              decoration: BoxDecoration(
+-                color: Surfaces.accent(dark).withValues(alpha: 0.18),
+-                shape: BoxShape.circle,
+-              ),
+-              child: Icon(icon, color: Surfaces.accent(dark), size: 18),
+-            ),
+-            const SizedBox(width: 12),
+-            Expanded(
+-              child: Text(label,
+-                  style: body(14, Surfaces.heading(dark), weight: FontWeight.w700)),
++            Row(
++              children: [
++                Container(
++                  width: 36,
++                  height: 36,
++                  decoration: BoxDecoration(
++                    color: Surfaces.accent(dark).withValues(alpha: 0.18),
++                    shape: BoxShape.circle,
++                  ),
++                  child: Icon(icon, color: Surfaces.accent(dark), size: 18),
++                ),
++                const SizedBox(width: 12),
++                Expanded(
++                  child: Text(label,
++                      style: body(14, Surfaces.heading(dark), weight: FontWeight.w700)),
++                ),
++                Flexible(
++                  child: Text(_summary,
++                      overflow: TextOverflow.ellipsis,
++                      style: body(11.5, Surfaces.muted(dark))),
++                ),
++                const SizedBox(width: 6),
++                Icon(Icons.chevron_right, color: Surfaces.muted(dark), size: 18),
++              ],
+             ),
+-            Text(summary, style: body(11.5, Surfaces.muted(dark))),
+-            const SizedBox(width: 6),
+-            Icon(Icons.chevron_right, color: Surfaces.muted(dark), size: 18),
++            if (total > 0) ...[
++              const SizedBox(height: 10),
++              ClipRRect(
++                borderRadius: BorderRadius.circular(4),
++                child: TweenAnimationBuilder<double>(
++                  tween: Tween(begin: 0, end: done / total),
++                  duration: const Duration(milliseconds: 450),
++                  curve: Curves.easeOutCubic,
++                  builder: (_, v, __) => LinearProgressIndicator(
++                    value: v,
++                    minHeight: 5,
++                    backgroundColor: Surfaces.accent(dark).withValues(alpha: 0.14),
++                    valueColor: AlwaysStoppedAnimation(Surfaces.accent(dark)),
++                  ),
++                ),
++              ),
++            ],
+           ],
+         ),
+       ),
+diff --git a/lib/screens/reminders_screen.dart b/lib/screens/reminders_screen.dart
+index d0ae481..1178f48 100644
+--- a/lib/screens/reminders_screen.dart
++++ b/lib/screens/reminders_screen.dart
+@@ -13,7 +13,9 @@ class RemindersScreen extends StatefulWidget {
+   State<RemindersScreen> createState() => _RemindersScreenState();
+ }
+ 
+-class _RemindersScreenState extends State<RemindersScreen> {
++class _RemindersScreenState extends State<RemindersScreen>
++    with WidgetsBindingObserver {
++  bool _exactOk = true;
+   bool _permissionGranted = true;
+   String _testMessage = '';
+   String _status = '';
+@@ -21,14 +23,32 @@ class _RemindersScreenState extends State<RemindersScreen> {
+   @override
+   void initState() {
+     super.initState();
++    WidgetsBinding.instance.addObserver(this);
+     _checkPermission();
+   }
+ 
++  @override
++  void dispose() {
++    WidgetsBinding.instance.removeObserver(this);
++    super.dispose();
++  }
++
++  // Coming back from the system "Alarms & reminders" screen: pick up the
++  // new permission state and reschedule with exact alarms straight away.
++  @override
++  void didChangeAppLifecycleState(AppLifecycleState state) {
++    if (state == AppLifecycleState.resumed) {
++      store.rescheduleReminders().then((_) => _checkPermission());
++    }
++  }
++
+   Future<void> _checkPermission() async {
+     final granted = await Notifications.instance.permissionGranted();
+     final status = await Notifications.instance.statusSummary();
++    final exact = await Notifications.instance.exactAllowed();
+     if (mounted) {
+       setState(() {
++        _exactOk = exact;
+         _permissionGranted = granted;
+         _status = status;
+       });
+@@ -133,6 +153,31 @@ class _RemindersScreenState extends State<RemindersScreen> {
+                                 ),
+                               ),
+                             ),
++                          if (_permissionGranted && !_exactOk)
++                            Padding(
++                              padding: const EdgeInsets.only(bottom: 14),
++                              child: ModuleCard(
++                                accent: true,
++                                child: Column(
++                                  crossAxisAlignment: CrossAxisAlignment.start,
++                                  children: [
++                                    Text('Allow on-time reminders',
++                                        style: body(13.5, Surfaces.accentText(dark),
++                                            weight: FontWeight.w700)),
++                                    const SizedBox(height: 6),
++                                    Text(
++                                        'Without this, your phone can delay or skip reminders when it is idle. Tap below, then switch on "Allow setting alarms and reminders" for Prakriyā.',
++                                        style: body(12.5, Surfaces.bodyText(dark))),
++                                    const SizedBox(height: 14),
++                                    GoldButton(
++                                      labelText: 'Allow on-time reminders',
++                                      onPressed: () =>
++                                          Notifications.instance.requestExact(),
++                                    ),
++                                  ],
++                                ),
++                              ),
++                            ),
+                           Padding(
+                             padding: const EdgeInsets.only(bottom: 14),
+                             child: ModuleCard(
+@@ -486,7 +531,7 @@ class _RemindersScreenState extends State<RemindersScreen> {
+       case 'mantra':
+         return 'Sent with your top 3 priorities';
+       case 'midday':
+-        return 'Only if something is still open';
++        return 'Your open priorities, around midday';
+       case 'evening':
+         return 'Habits and tomorrow';
+       case 'spendWeekly':
