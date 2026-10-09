@@ -509,6 +509,11 @@ class _SectionScreenState extends State<_SectionScreen> {
                       color: Surfaces.accent(dark),
                       child: SingleChildScrollView(
                         controller: _scrollController,
+                        // Without this, a screen whose content is shorter
+                        // than the display can't be overscrolled on Android,
+                        // so the pull-down gesture never reaches the
+                        // RefreshIndicator and "swipe to refresh" does nothing.
+                        physics: const AlwaysScrollableScrollPhysics(),
                         padding: const EdgeInsets.fromLTRB(20, 4, 20, 32),
                         child: ModuleCard(
                           child: Column(

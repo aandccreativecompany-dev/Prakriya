@@ -158,8 +158,20 @@ jobs:
           assert old_signing in src, "build.gradle.kts template changed — debug signingConfig line not found"
           src = src.replace(old_signing, new_signing, 1)
 
+          # R8/ProGuard code shrinking strips the generic type info that
+          # flutter_local_notifications serialises scheduled reminders with
+          # (Gson), so in a release build every zonedSchedule() call fails
+          # while debug builds work. Shrinking saves only a few MB, so it
+          # is turned off outright rather than patched with keep rules.
+          src = src.replace(
+              'signingConfig = if (keystorePropertiesFile.exists())',
+              'isMinifyEnabled = false\n'
+              '            isShrinkResources = false\n'
+              '            signingConfig = if (keystorePropertiesFile.exists())', 1)
+          assert 'isMinifyEnabled = false' in src, "minify patch did not apply"
+
           open(path, 'w').write(src)
-          print("release signing config wired up")
+          print("release signing config wired up, minify disabled")
           PYEOF
 
       - run: flutter pub get

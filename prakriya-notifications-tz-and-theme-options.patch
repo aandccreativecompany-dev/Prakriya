@@ -1,0 +1,173 @@
+diff --git a/lib/notifications.dart b/lib/notifications.dart
+index cd3749c..c75be8f 100644
+--- a/lib/notifications.dart
++++ b/lib/notifications.dart
+@@ -26,8 +26,14 @@ class Notifications {
+     try {
+       final name = await FlutterTimezone.getLocalTimezone();
+       tz.setLocalLocation(tz.getLocation(name));
+-    } catch (_) {
+-      // Fall back to UTC rather than crash on an unknown zone name.
++    } catch (e) {
++      // Falls back to UTC rather than crash on an unrecognised zone name.
++      // This used to also silently shift every reminder's fire time by the
++      // device's UTC offset (see _nextInstance) — that part is fixed now,
++      // but this print is kept so a logcat capture can still confirm
++      // whether a given device's timezone name is failing to resolve here.
++      // ignore: avoid_print
++      print('Prakriya: timezone lookup failed, falling back to UTC: $e');
+     }
+ 
+     try {
+@@ -87,19 +93,24 @@ class Notifications {
+   /// at every app launch (it already does, via Store.load) to roll the
+   /// occurrence forward once the date passes.
+   Future<void> _scheduleKeyDate(KeyDate keyDate) async {
+-    final now = tz.TZDateTime.now(tz.local);
++    // See the note on _nextInstance below: the wall-clock math here is done
++    // in plain Dart DateTime (always correctly local to the device, no
++    // timezone-database lookup involved) and only converted to a
++    // tz.TZDateTime — via .from(), which preserves the exact instant — at
++    // the very end, purely because the plugin's API asks for one.
++    final now = DateTime.now();
+     var year = now.year;
+     // Clamp the day to whatever the target month actually has (handles a
+     // Feb 29 saved in a leap year, or any other invalid combination) —
+-    // without this, tz.TZDateTime(..., 29) for Feb in a non-leap year
+-    // would silently roll over into March instead of firing in February.
++    // without this, DateTime(..., 29) for Feb in a non-leap year would
++    // silently roll over into March instead of firing in February.
+     int lastDayOf(int y, int m) => DateTime(y, m + 1, 0).day;
+     var day = keyDate.day.clamp(1, lastDayOf(year, keyDate.month));
+-    var scheduled = tz.TZDateTime(tz.local, year, keyDate.month, day, 9, 0);
++    var scheduled = DateTime(year, keyDate.month, day, 9, 0);
+     if (!scheduled.isAfter(now)) {
+       year += 1;
+       day = keyDate.day.clamp(1, lastDayOf(year, keyDate.month));
+-      scheduled = tz.TZDateTime(tz.local, year, keyDate.month, day, 9, 0);
++      scheduled = DateTime(year, keyDate.month, day, 9, 0);
+     }
+     // A stable id derived from the key date's own id, offset well clear of
+     // the fixed 1/2/3 used by the daily reminders above.
+@@ -108,7 +119,7 @@ class Notifications {
+       id,
+       '🎉 ${keyDate.title}',
+       "Today's the day — ${keyDate.title}.",
+-      scheduled,
++      tz.TZDateTime.from(scheduled, tz.local),
+       _details,
+       androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+       uiLocalNotificationDateInterpretation:
+@@ -116,14 +127,28 @@ class Notifications {
+     );
+   }
+ 
++  /// Computes "today (or tomorrow, if the time already passed) at
++  /// hour:minute" using plain Dart DateTime — which is always correctly the
++  /// device's own local time, with no timezone-database lookup involved —
++  /// then converts the result to a tz.TZDateTime only at the end, via
++  /// .from(), purely because that's the type flutter_local_notifications'
++  /// scheduling API expects. TZDateTime.from() preserves the exact instant
++  /// of the DateTime it's given regardless of which Location it's tagged
++  /// with, so this gives the right fire time even on a device where
++  /// FlutterTimezone.getLocalTimezone() returned a name tz.getLocation()
++  /// couldn't parse and init() silently fell back to UTC above: doing the
++  /// arithmetic in tz.TZDateTime(tz.local, ...) directly, as this used to,
++  /// would silently schedule every reminder at the UTC clock time instead
++  /// of the device's real local time whenever that fallback kicked in —
++  /// for IST that's a fixed 5.5-hour shift, enough to make a reminder set
++  /// for "2 minutes from now" fire hours later (or earlier) instead.
+   tz.TZDateTime _nextInstance(int hour, int minute) {
+-    final now = tz.TZDateTime.now(tz.local);
+-    var scheduled =
+-        tz.TZDateTime(tz.local, now.year, now.month, now.day, hour, minute);
++    final now = DateTime.now();
++    var scheduled = DateTime(now.year, now.month, now.day, hour, minute);
+     if (!scheduled.isAfter(now)) {
+       scheduled = scheduled.add(const Duration(days: 1));
+     }
+-    return scheduled;
++    return tz.TZDateTime.from(scheduled, tz.local);
+   }
+ 
+   /// Next occurrence of [weekday] (1 = Monday .. 7 = Sunday, matching
+@@ -137,24 +162,26 @@ class Notifications {
+   }
+ 
+   /// Next occurrence of the given day-of-month at the given time — clamped
+-  /// so a "31st" target never overflows into the following month.
++  /// so a "31st" target never overflows into the following month. See the
++  /// note on _nextInstance above for why the arithmetic is done in plain
++  /// Dart DateTime rather than tz.TZDateTime(tz.local, ...).
+   tz.TZDateTime _nextDayOfMonth(int day, int hour, int minute) {
+-    final now = tz.TZDateTime.now(tz.local);
++    final now = DateTime.now();
+     int lastDayOf(int y, int m) => DateTime(y, m + 1, 0).day;
+     var year = now.year;
+     var month = now.month;
+-    var scheduled = tz.TZDateTime(
+-        tz.local, year, month, day.clamp(1, lastDayOf(year, month)), hour, minute);
++    var scheduled =
++        DateTime(year, month, day.clamp(1, lastDayOf(year, month)), hour, minute);
+     if (!scheduled.isAfter(now)) {
+       month += 1;
+       if (month > 12) {
+         month = 1;
+         year += 1;
+       }
+-      scheduled = tz.TZDateTime(
+-          tz.local, year, month, day.clamp(1, lastDayOf(year, month)), hour, minute);
++      scheduled =
++          DateTime(year, month, day.clamp(1, lastDayOf(year, month)), hour, minute);
+     }
+-    return scheduled;
++    return tz.TZDateTime.from(scheduled, tz.local);
+   }
+ 
+   /// Fires immediately — used for the budget-threshold alert, which can't be
+diff --git a/lib/theme.dart b/lib/theme.dart
+index f3ad115..1d94edc 100644
+--- a/lib/theme.dart
++++ b/lib/theme.dart
+@@ -89,6 +89,30 @@ const kAccentPalettes = [
+     pale: Color(0xFFFFDECE),
+     deep: Color(0xFFB8481F),
+   ),
++  AccentPalette(
++    id: 'teal',
++    label: 'Teal',
++    dark: Color(0xFF6FE0D0),
++    light: Color(0xFF1FA396),
++    pale: Color(0xFFD2F5F0),
++    deep: Color(0xFF0D6D63),
++  ),
++  AccentPalette(
++    id: 'indigo',
++    label: 'Indigo',
++    dark: Color(0xFF9FA8FF),
++    light: Color(0xFF5A64E0),
++    pale: Color(0xFFE2E4FF),
++    deep: Color(0xFF3A3FA0),
++  ),
++  AccentPalette(
++    id: 'sunset',
++    label: 'Sunset',
++    dark: Color(0xFFFFB36F),
++    light: Color(0xFFE8822E),
++    pale: Color(0xFFFFE6CC),
++    deep: Color(0xFFA85A14),
++  ),
+ ];
+ 
+ /// The currently selected accent, module-level so [Surfaces] (a pure,
+@@ -126,6 +150,10 @@ const kFontFamilies = [
+   AppFont('montserrat', 'Montserrat', 'Montserrat'),
+   AppFont('lora', 'Lora', 'Lora'),
+   AppFont('merriweather', 'Merriweather', 'Merriweather'),
++  AppFont('dmSans', 'DM Sans', 'DM Sans'),
++  AppFont('spaceGrotesk', 'Space Grotesk', 'Space Grotesk'),
++  AppFont('sourceSans', 'Source Sans 3', 'Source Sans 3'),
++  AppFont('fraunces', 'Fraunces', 'Fraunces'),
+ ];
+ 
+ /// One selectable text size scale. Kept to a small, hand-picked set of

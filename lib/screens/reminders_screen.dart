@@ -15,6 +15,8 @@ class RemindersScreen extends StatefulWidget {
 
 class _RemindersScreenState extends State<RemindersScreen> {
   bool _permissionGranted = true;
+  String _testMessage = '';
+  String _status = '';
 
   @override
   void initState() {
@@ -24,7 +26,25 @@ class _RemindersScreenState extends State<RemindersScreen> {
 
   Future<void> _checkPermission() async {
     final granted = await Notifications.instance.permissionGranted();
-    if (mounted) setState(() => _permissionGranted = granted);
+    final status = await Notifications.instance.statusSummary();
+    if (mounted) {
+      setState(() {
+        _permissionGranted = granted;
+        _status = status;
+      });
+    }
+  }
+
+  Future<void> _runTest(Future<String> Function() test) async {
+    setState(() => _testMessage = 'Working…');
+    final result = await test();
+    final status = await Notifications.instance.statusSummary();
+    if (mounted) {
+      setState(() {
+        _testMessage = result;
+        _status = status;
+      });
+    }
   }
 
   Future<void> _enable(ReminderSetting reminder, bool value) async {
@@ -34,7 +54,11 @@ class _RemindersScreenState extends State<RemindersScreen> {
       if (!granted) return;
     }
     await store.setReminderEnabled(reminder, value);
-    if (mounted) toastSaved(context);
+    final status = await Notifications.instance.statusSummary();
+    if (mounted) {
+      setState(() => _status = status);
+      toastSaved(context);
+    }
   }
 
   Future<void> _pickTime(ReminderSetting reminder) async {
@@ -44,7 +68,11 @@ class _RemindersScreenState extends State<RemindersScreen> {
     );
     if (picked != null) {
       await store.setReminderTime(reminder, picked.hour, picked.minute);
-      if (mounted) toastSaved(context);
+      final status = await Notifications.instance.statusSummary();
+      if (mounted) {
+        setState(() => _status = status);
+        toastSaved(context);
+      }
     }
   }
 
@@ -105,6 +133,53 @@ class _RemindersScreenState extends State<RemindersScreen> {
                                 ),
                               ),
                             ),
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 14),
+                            child: ModuleCard(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('Check that reminders work on this phone',
+                                      style: body(13.5, Surfaces.heading(dark),
+                                          weight: FontWeight.w700)),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                      'Tap "Send now" to see one immediately. Tap "In 1 minute", then close the app and wait: that is the same path your daily reminders use.',
+                                      style: body(12, Surfaces.muted(dark)).copyWith(height: 1.4)),
+                                  const SizedBox(height: 12),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: OutlinedButton(
+                                          onPressed: () => _runTest(
+                                              Notifications.instance.sendTestNow),
+                                          child: const Text('Send now'),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: OutlinedButton(
+                                          onPressed: () => _runTest(Notifications
+                                              .instance.scheduleTestInOneMinute),
+                                          child: const Text('In 1 minute'),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  if (_testMessage.isNotEmpty) ...[
+                                    const SizedBox(height: 10),
+                                    Text(_testMessage,
+                                        style: body(12, Surfaces.accentText(dark))),
+                                  ],
+                                  if (_status.isNotEmpty) ...[
+                                    const SizedBox(height: 6),
+                                    Text(_status,
+                                        style: body(11.5, Surfaces.muted(dark))),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ),
                           for (var i = 0; i < store.reminders.length; i++)
                             TweenAnimationBuilder<double>(
                               tween: Tween(begin: 0, end: 1),

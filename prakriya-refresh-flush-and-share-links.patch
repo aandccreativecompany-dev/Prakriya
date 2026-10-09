@@ -1,0 +1,45 @@
+diff --git a/lib/screens/home_screen.dart b/lib/screens/home_screen.dart
+index 108303c..6d0af22 100644
+--- a/lib/screens/home_screen.dart
++++ b/lib/screens/home_screen.dart
+@@ -468,7 +468,24 @@ class _SectionScreenState extends State<_SectionScreen> {
+         duration: const Duration(milliseconds: 420), curve: Curves.easeOutCubic);
+   }
+ 
+-  Future<void> _refresh() async => store.load();
++  // store.load() unconditionally overwrites in-memory state with whatever
++  // is currently on disk. Every store.addX(...)/setX(...) call already
++  // updates the screen instantly (via the synchronous notifyListeners()
++  // inside _commit()), but the matching disk write is queued and finishes
++  // slightly later in the background — so without this flush() first, a
++  // pull-to-refresh done shortly after entering something could re-read
++  // disk before that write lands, and load() would then replace the
++  // in-memory state (including the thing you just entered) with the
++  // older, still-on-disk version. That exactly matched the "it doesn't
++  // save until I close and reopen the app" report: closing the app
++  // properly flushes pending writes first (see main.dart's lifecycle
++  // handling), so reopening always saw the latest data, while refreshing
++  // without closing could actually revert it. Awaiting the flush here
++  // guarantees load() can only ever see the same state or newer.
++  Future<void> _refresh() async {
++    await store.flush();
++    await store.load();
++  }
+ 
+   @override
+   Widget build(BuildContext context) {
+diff --git a/lib/screens/quote_screen.dart b/lib/screens/quote_screen.dart
+index 8372315..02762a2 100644
+--- a/lib/screens/quote_screen.dart
++++ b/lib/screens/quote_screen.dart
+@@ -10,8 +10,8 @@ class QuoteScreen extends StatelessWidget {
+   const QuoteScreen({super.key});
+ 
+   static const _shareFooter = 'A and C Creative Ventures\n'
+-      'aandccreativecompany.netlify.app\n'
+-      'IG/Threads/YT @aandccreativecompany';
++      'aandccreativeventures.com\n'
++      'IG/Threads/YT @aandccreativeventures';
+ 
+   @override
+   Widget build(BuildContext context) {

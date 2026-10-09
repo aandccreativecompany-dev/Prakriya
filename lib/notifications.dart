@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:timezone/data/latest_all.dart' as tzdata;
@@ -13,6 +14,12 @@ class Notifications {
   final FlutterLocalNotificationsPlugin _plugin =
       FlutterLocalNotificationsPlugin();
   bool _initialised = false;
+
+  /// Diagnostics shown on the Reminders screen so a silent failure is no
+  /// longer invisible: how many reminders the last scheduleAll() actually
+  /// handed to Android, and the last error it hit (if any).
+  int lastScheduledCount = 0;
+  String? lastError;
 
   static const _channelId = 'prakriya_daily';
   static const _channelName = 'Daily reminders';
@@ -241,13 +248,19 @@ class Notifications {
       await init();
       await _plugin.cancelAll();
 
-      if (!await permissionGranted()) return;
+      if (!await permissionGranted()) {
+        lastError = 'Notification permission is off';
+        return;
+      }
+      lastError = null;
+      var scheduled = 0;
 
       for (final keyDate in keyDates) {
         try {
           await _scheduleKeyDate(keyDate);
-        } catch (_) {
-          // Skip this one key date, keep going with the rest.
+        } catch (e) {
+          lastError = 'Key date: $e';
+          debugPrint('Prakriya: key date scheduling failed: $e');
         }
       }
 
@@ -266,21 +279,28 @@ class Notifications {
                 hour: reminder.hour,
                 minute: reminder.minute,
               );
+              scheduled++;
               break;
 
             case 'midday':
-              // Fires only when something is still open.
-              if (openTasks.isEmpty) break;
+              // Always scheduled (this used to be skipped when no task was
+              // open at the moment of scheduling, so a user who added their
+              // tasks later never got a midday nudge at all).
               final count = openTasks.length;
               await _schedule(
                 id: 2,
-                title: count == 1
-                    ? '1 priority still open'
-                    : '$count priorities still open',
-                body: openTasks.join('\n'),
+                title: count == 0
+                    ? 'Midday check-in'
+                    : (count == 1
+                        ? '1 priority still open'
+                        : '$count priorities still open'),
+                body: count == 0
+                    ? 'How is your day going? Open Prakriyā and check your priorities.'
+                    : openTasks.join('\n'),
                 hour: reminder.hour,
                 minute: reminder.minute,
               );
+              scheduled++;
               break;
 
             case 'evening':
@@ -291,6 +311,7 @@ class Notifications {
                 hour: reminder.hour,
                 minute: reminder.minute,
               );
+              scheduled++;
               break;
 
             case 'spendWeekly':
@@ -305,6 +326,7 @@ class Notifications {
                     UILocalNotificationDateInterpretation.absoluteTime,
                 matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
               );
+              scheduled++;
               break;
 
             case 'spendMonthly':
@@ -319,6 +341,7 @@ class Notifications {
                     UILocalNotificationDateInterpretation.absoluteTime,
                 matchDateTimeComponents: DateTimeComponents.dayOfMonthAndTime,
               );
+              scheduled++;
               break;
 
             case 'spendAlerts':
@@ -326,14 +349,91 @@ class Notifications {
               // instant, live alert fired from Store.maybeSendSpendAlert.
               break;
           }
-        } catch (_) {
-          // Skip this one reminder, keep going with the rest.
+        } catch (e) {
+          // Skip this one reminder, keep going with the rest — but remember
+          // why, so the Reminders screen can show it instead of the user
+          // just seeing nothing ever arrive.
+          lastError = 'Reminder "${reminder.id}": $e';
+          debugPrint('Prakriya: scheduling ${reminder.id} failed: $e');
         }
       }
-    } catch (_) {
+      lastScheduledCount = scheduled;
+    } catch (e) {
       // Whatever else went wrong (plugin unavailable, permission check
       // itself threw, etc.) — reminders just don't get (re)scheduled this
       // time. The rest of the app must not depend on this succeeding.
+      lastError = '$e';
+      debugPrint('Prakriya: scheduleAll failed: $e');
+    }
+  }
+
+  /// Fires a notification right now. Tells you whether the phone's
+  /// notification pipeline (permission + channel) works at all.
+  Future<String> sendTestNow() async {
+    try {
+      await init();
+      if (!await permissionGranted()) {
+        return 'Notifications are blocked for Prakriyā. Turn them on in '
+            'phone Settings > Apps > Prakriyā > Notifications.';
+      }
+      await _plugin.show(900, 'Prakriyā test',
+          'If you can read this, notifications work on this phone.', _details);
+      return 'Sent. A notification should appear right now.';
+    } catch (e) {
+      return 'Could not show a notification: $e';
+    }
+  }
+
+  /// Schedules a one-off notification ~60 seconds from now through the same
+  /// alarm path the real reminders use. Close the app after tapping it: if
+  /// this arrives, scheduled reminders work; if it doesn't, the phone (or
+  /// the build) is blocking background alarms.
+  Future<String> scheduleTestInOneMinute() async {
+    try {
+      await init();
+      if (!await permissionGranted()) {
+        return 'Notifications are blocked for Prakriyā. Turn them on in '
+            'phone Settings > Apps > Prakriyā > Notifications.';
+      }
+      final android = _plugin.resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
+      var exact = false;
+      try {
+        exact = await android?.canScheduleExactNotifications() ?? false;
+      } catch (_) {}
+      final at = DateTime.now().add(const Duration(seconds: 60));
+      await _plugin.zonedSchedule(
+        901,
+        'Prakriyā scheduled test',
+        'Scheduled reminders work on this phone.',
+        tz.TZDateTime.from(at, tz.local),
+        _details,
+        androidScheduleMode: exact
+            ? AndroidScheduleMode.exactAllowWhileIdle
+            : AndroidScheduleMode.inexactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+      );
+      final pending = (await _plugin.pendingNotificationRequests()).length;
+      final hh = at.hour.toString().padLeft(2, '0');
+      final mm = at.minute.toString().padLeft(2, '0');
+      return 'Scheduled for $hh:$mm ($pending reminders waiting). Close the '
+          'app now and wait about a minute'
+          '${exact ? '' : ' (it can be a few minutes late on some phones)'}.';
+    } catch (e) {
+      return 'Scheduling failed: $e';
+    }
+  }
+
+  /// Human-readable summary for the Reminders screen.
+  Future<String> statusSummary() async {
+    try {
+      await init();
+      final pending = (await _plugin.pendingNotificationRequests()).length;
+      final err = lastError == null ? '' : '\nLast error: $lastError';
+      return '$pending scheduled on this phone.$err';
+    } catch (e) {
+      return 'Could not read schedule: $e';
     }
   }
 }

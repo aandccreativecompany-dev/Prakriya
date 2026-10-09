@@ -86,8 +86,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
         child: SafeArea(
           child: Stack(
             children: [
-              ListView(
+              RefreshIndicator(
+                onRefresh: () async {
+                  await store.flush();
+                  await store.load();
+                },
+                child: ListView(
                 key: const ValueKey('dashboardList'),
+                physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.fromLTRB(18, 8, 18, 32),
                 children: [
                   Row(
@@ -222,6 +228,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                   ),
                 ],
+                ),
               ),
               Positioned.fill(
                 child: IgnorePointer(

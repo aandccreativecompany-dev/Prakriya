@@ -1,0 +1,67 @@
+From c22c6f2a5b06632d125be432c8b419a3104ca98c Mon Sep 17 00:00:00 2001
+From: A&C <noreply@example.com>
+Date: Mon, 28 Sep 2026 07:21:27 +0000
+Subject: [PATCH] v0.8.1: Play release build - disable GitHub update banner,
+ bump version
+
+---
+ lib/app_version.dart | 2 +-
+ lib/models.dart      | 5 +++++
+ lib/store.dart       | 1 +
+ pubspec.yaml         | 2 +-
+ 4 files changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/lib/app_version.dart b/lib/app_version.dart
+index 1d1b450..a870b0f 100644
+--- a/lib/app_version.dart
++++ b/lib/app_version.dart
+@@ -5,4 +5,4 @@
+ /// the one extra manual step release day needs, kept deliberately simple
+ /// (no plugin, no platform channel) so a version check never costs the app
+ /// a single extra byte of native code.
+-const String kAppVersion = '0.8.0';
++const String kAppVersion = '0.8.1';
+diff --git a/lib/models.dart b/lib/models.dart
+index 79bdbd3..6aa5186 100644
+--- a/lib/models.dart
++++ b/lib/models.dart
+@@ -553,6 +553,11 @@ class CoachMessage {
+ /// still there, just unreachable from the UI while this is false.
+ const kCoachChatEnabled = false;
+ 
++/// Master switch for the in-app "new version on GitHub" banner. Off for the
++/// Google Play build: Play delivers updates itself, and the banner links to
++/// sideload releases on GitHub. Flip to true only for a sideload (APK) build.
++const kGithubUpdateCheckEnabled = false;
++
+ /// How many coach messages a user may send per calendar day — a cost
+ /// control on a per-request-priced API, not a security boundary (there's no
+ /// server-side per-user auth to enforce it against a modified client — see
+diff --git a/lib/store.dart b/lib/store.dart
+index 4211e0a..88541ad 100644
+--- a/lib/store.dart
++++ b/lib/store.dart
+@@ -32,6 +32,7 @@ class Store extends ChangeNotifier {
+   /// startup and never throws. Safe to call once per launch (see main.dart);
+   /// a dismissed version is skipped until something newer comes out.
+   Future<void> checkForUpdate() async {
++    if (!kGithubUpdateCheckEnabled) return;
+     try {
+       final info = await UpdateChecker.instance.checkForUpdate();
+       if (info == null) return;
+diff --git a/pubspec.yaml b/pubspec.yaml
+index 222c554..7cae345 100644
+--- a/pubspec.yaml
++++ b/pubspec.yaml
+@@ -1,7 +1,7 @@
+ name: prakriya
+ description: Prakriyā — a daily ritual and manifestation practice app.
+ publish_to: 'none'
+-version: 0.8.0+22
++version: 0.8.1+23
+ 
+ environment:
+   sdk: '>=3.4.0 <4.0.0'
+-- 
+2.43.0
+

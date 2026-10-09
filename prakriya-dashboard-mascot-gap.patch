@@ -1,0 +1,100 @@
+diff --git a/lib/screens/dashboard_screen.dart b/lib/screens/dashboard_screen.dart
+index f8f9571..0c3990b 100644
+--- a/lib/screens/dashboard_screen.dart
++++ b/lib/screens/dashboard_screen.dart
+@@ -15,11 +15,24 @@ import 'settings_screen.dart';
+ /// summary, all in one place instead of being repeated at the top of every
+ /// section. Each other section is reached from here (or the bottom nav)
+ /// as its own separate, focused screen.
+-class DashboardScreen extends StatelessWidget {
++class DashboardScreen extends StatefulWidget {
+   final List<HomePageSection> sections;
+   final void Function(String sectionKey) onOpenSection;
+   const DashboardScreen({super.key, required this.sections, required this.onOpenSection});
+ 
++  @override
++  State<DashboardScreen> createState() => _DashboardScreenState();
++}
++
++class _DashboardScreenState extends State<DashboardScreen> {
++  // The GreetingMascot below plays a one-time ~3.4s walk-across animation,
++  // then collapses to nothing. The 90px gap it walks through used to be a
++  // fixed SizedBox, so once the mascot vanished that gap stayed reserved
++  // forever — a permanent empty strip between the greeting and the mantra
++  // card on every dashboard visit. Shrinking it here once the animation
++  // reports itself done keeps the space only while it's actually in use.
++  bool _mascotDone = false;
++
+   String _greeting() {
+     final hour = DateTime.now().hour;
+     if (hour < 5) return 'Still up';
+@@ -106,7 +119,11 @@ class DashboardScreen extends StatelessWidget {
+                     const SizedBox(height: 14),
+                     _SignInBanner(dark: dark),
+                   ],
+-                  const SizedBox(height: 90),
++                  AnimatedSize(
++                    duration: const Duration(milliseconds: 320),
++                    curve: Curves.easeOut,
++                    child: SizedBox(height: _mascotDone ? 8 : 90),
++                  ),
+                   InkWell(
+                     borderRadius: BorderRadius.circular(20),
+                     onTap: () => Navigator.of(context)
+@@ -175,13 +192,13 @@ class DashboardScreen extends StatelessWidget {
+                     crossAxisSpacing: 10,
+                     childAspectRatio: 1.7,
+                     children: [
+-                      for (final section in sections)
++                      for (final section in widget.sections)
+                         _SectionTile(
+                           title: section.title,
+                           icon: _sectionIcon(section.key),
+                           performance: store.sectionPerformance(section.key),
+                           dark: dark,
+-                          onTap: () => onOpenSection(section.key),
++                          onTap: () => widget.onOpenSection(section.key),
+                         ),
+                     ],
+                   ),
+@@ -216,6 +233,9 @@ class DashboardScreen extends StatelessWidget {
+                       child: GreetingMascot(
+                         avatarGender: store.avatarGender,
+                         greeting: mascotGreeting,
++                        onDone: () {
++                          if (mounted) setState(() => _mascotDone = true);
++                        },
+                       ),
+                     ),
+                   ),
+diff --git a/lib/widgets/common.dart b/lib/widgets/common.dart
+index a71005f..72313af 100644
+--- a/lib/widgets/common.dart
++++ b/lib/widgets/common.dart
+@@ -478,7 +478,17 @@ const List<String> kMascotGreetings = [
+ class GreetingMascot extends StatefulWidget {
+   final String avatarGender;
+   final String greeting;
+-  const GreetingMascot({super.key, required this.avatarGender, required this.greeting});
++  /// Called once, right when the walk-across animation finishes and this
++  /// widget collapses to nothing. Lets a parent that reserved layout space
++  /// for the animation (see DashboardScreen) shrink that space back down
++  /// instead of leaving a permanent empty gap once the mascot is gone.
++  final VoidCallback? onDone;
++  const GreetingMascot({
++    super.key,
++    required this.avatarGender,
++    required this.greeting,
++    this.onDone,
++  });
+ 
+   @override
+   State<GreetingMascot> createState() => _GreetingMascotState();
+@@ -498,6 +508,7 @@ class _GreetingMascotState extends State<GreetingMascot>
+     _controller.addStatusListener((status) {
+       if (status == AnimationStatus.completed && mounted) {
+         setState(() => _dismissed = true);
++        widget.onDone?.call();
+       }
+     });
+   }
