@@ -4,6 +4,7 @@ import 'package:flutter/services.dart' show HapticFeedback;
 import '../models.dart';
 import '../store.dart';
 import '../theme.dart';
+import '../widgets/boosters.dart';
 import '../widgets/common.dart';
 import 'dashboard_screen.dart';
 import 'evening_reflection_screen.dart';
@@ -119,6 +120,46 @@ class _HomeScreenState extends State<HomeScreen> {
   // stale until you switched tabs or reopened the app.
   Widget _itemFor(String id) => _LiveItem(() => _rawItemFor(id));
 
+  void _openTodos() => Navigator.of(context)
+      .push(MaterialPageRoute(builder: (_) => const TodoListScreen()));
+
+  /// A section's items: the new booster cards for that section, then the
+  /// section's own modules (habit insights go right after the habit list).
+  List<Widget> _itemsFor(HomePageSection section, List<String> visible) {
+    final pre = <Widget>[];
+    switch (section.key) {
+      case 'productivity':
+        pre.add(TopThreeCard(onAdd: _openTodos));
+        pre.add(const FocusTimerCard());
+        break;
+      case 'finance':
+        pre.add(MoneySnapshotCard(
+          onOpenWallet: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const SpendingTrackerScreen())),
+        ));
+        break;
+      case 'health':
+        pre.add(const HealthQuickLogCard());
+        break;
+      case 'mindset':
+        pre.add(const GratitudeCard());
+        break;
+      case 'relationships':
+        pre.add(const ReachOutCard());
+        break;
+      case 'nutrition':
+        pre.add(const RepeatMealCard());
+        break;
+    }
+    final items = <Widget>[...pre];
+    for (final id in section.moduleIds) {
+      if (!visible.contains(id)) continue;
+      items.add(_itemFor(id));
+      if (id == 'habits') items.add(const HabitInsightsCard());
+    }
+    return items;
+  }
+
   // ignore: prefer_const_constructors
   Widget _rawItemFor(String id) {
     switch (id) {
@@ -172,10 +213,7 @@ class _HomeScreenState extends State<HomeScreen> {
       builder: (_) => _SectionScreen(
         title: section.title,
         sectionKey: section.key,
-        items: [
-          for (final id in section.moduleIds)
-            if (visible.contains(id)) _itemFor(id),
-        ],
+        items: _itemsFor(section, visible),
       ),
     ));
   }
@@ -212,10 +250,7 @@ class _HomeScreenState extends State<HomeScreen> {
               title: section.title,
               sectionKey: section.key,
               showBackButton: false,
-              items: [
-                for (final id in section.moduleIds)
-                  if (visible.contains(id)) _itemFor(id),
-              ],
+              items: _itemsFor(section, visible),
             ),
           // Products and Coach aren't personal-tracking modules gated by the
           // Settings module toggle like the sections above — they're always

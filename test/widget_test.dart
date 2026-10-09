@@ -46,7 +46,7 @@ void main() {
     // this content may not be built/visible yet — scroll the Dashboard's own
     // list down by a fixed amount first.
     await tester.drag(
-        find.byKey(const ValueKey('dashboardList')), const Offset(0, -400));
+        find.byKey(const ValueKey('dashboardList')), const Offset(0, -600));
     await tester.pumpAndSettle();
     expect(find.text('YOUR SECTIONS'), findsOneWidget);
     expect(find.text('Productivity'), findsWidgets);

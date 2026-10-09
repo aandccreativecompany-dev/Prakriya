@@ -11,6 +11,7 @@ import 'screens/lock_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'services/auth_service.dart';
 import 'services/cloud_sync.dart';
+import 'services/extras.dart';
 import 'services/home_widget_service.dart';
 import 'store.dart';
 import 'theme.dart';
@@ -88,6 +89,11 @@ Future<void> main() async {
       // fallible tail (reminders); if it threw before reaching that line,
       // force it here so the UI doesn't sit waiting on it forever.
       store.ready = true;
+    }
+    try {
+      await extras.load();
+    } catch (error, stack) {
+      debugPrint('extras.load failed: $error\n$stack');
     }
     try {
       HomeWidgetService.instance.wire();

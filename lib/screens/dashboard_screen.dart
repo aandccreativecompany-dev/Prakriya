@@ -6,7 +6,9 @@ import '../models.dart';
 import '../services/auth_service.dart';
 import '../store.dart';
 import '../theme.dart';
+import '../widgets/boosters.dart';
 import '../widgets/common.dart';
+import 'reminders_screen.dart';
 import 'about_screen.dart';
 import 'quote_screen.dart';
 import 'settings_screen.dart';
@@ -187,6 +189,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ),
                     ],
                   ),
+                  FirstWeekChecklist(
+                    onOpenProductivity: () => widget.onOpenSection('productivity'),
+                    onOpenReminders: () => Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => const RemindersScreen())),
+                  ),
+                  const WeeklyRecapCard(),
                   const SizedBox(height: 22),
                   Text('YOUR SECTIONS', style: label(Surfaces.muted(dark))),
                   const SizedBox(height: 10),

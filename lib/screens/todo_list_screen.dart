@@ -89,9 +89,39 @@ class _TodoListScreenState extends State<TodoListScreen> {
                     const SizedBox(height: 8),
                     Expanded(
                       child: tasks.isEmpty
-                          ? Center(
-                              child: Text('Nothing on the list yet.',
-                                  style: body(13, Surfaces.muted(dark))),
+                          ? ListView(
+                              padding: const EdgeInsets.fromLTRB(20, 32, 20, 32),
+                              children: [
+                                Icon(Icons.wb_twilight_rounded,
+                                    size: 44, color: Surfaces.accent(dark)),
+                                const SizedBox(height: 12),
+                                Text('A clear page. What would make today a win?',
+                                    textAlign: TextAlign.center,
+                                    style: body(15, Surfaces.heading(dark),
+                                        weight: FontWeight.w700)),
+                                const SizedBox(height: 6),
+                                Text('Type above, or tap a starter to add it in one go.',
+                                    textAlign: TextAlign.center,
+                                    style: body(12.5, Surfaces.muted(dark))),
+                                const SizedBox(height: 16),
+                                Wrap(
+                                  alignment: WrapAlignment.center,
+                                  spacing: 8,
+                                  runSpacing: 6,
+                                  children: [
+                                    for (final starter in const [
+                                      'Plan my top 3',
+                                      'Move for 20 minutes',
+                                      'Drink 8 glasses of water',
+                                      'Reach out to someone',
+                                    ])
+                                      ActionChip(
+                                        label: Text(starter),
+                                        onPressed: () => store.addTask(starter),
+                                      ),
+                                  ],
+                                ),
+                              ],
                             )
                           : ListView.builder(
                               padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
@@ -105,6 +135,36 @@ class _TodoListScreenState extends State<TodoListScreen> {
                                     offset: Offset(0, (1 - t.clamp(0, 1)) * 10),
                                     child: Opacity(opacity: t.clamp(0, 1), child: child),
                                   ),
+                                  child: Dismissible(
+                                    key: ObjectKey(tasks[i]),
+                                    background: Container(
+                                      margin: const EdgeInsets.only(bottom: 10),
+                                      padding: const EdgeInsets.only(left: 20),
+                                      alignment: Alignment.centerLeft,
+                                      decoration: BoxDecoration(
+                                        color: Colors.green.withValues(alpha: 0.25),
+                                        borderRadius: BorderRadius.circular(20),
+                                      ),
+                                      child: const Icon(Icons.check_rounded),
+                                    ),
+                                    secondaryBackground: Container(
+                                      margin: const EdgeInsets.only(bottom: 10),
+                                      padding: const EdgeInsets.only(right: 20),
+                                      alignment: Alignment.centerRight,
+                                      decoration: BoxDecoration(
+                                        color: Colors.redAccent.withValues(alpha: 0.25),
+                                        borderRadius: BorderRadius.circular(20),
+                                      ),
+                                      child: const Icon(Icons.delete_outline),
+                                    ),
+                                    confirmDismiss: (direction) async {
+                                      if (direction == DismissDirection.startToEnd) {
+                                        await store.toggleTask(i);
+                                        return false;
+                                      }
+                                      return true;
+                                    },
+                                    onDismissed: (_) => store.removeTask(i),
                                   child: Padding(
                                     padding: const EdgeInsets.only(bottom: 10),
                                     child: ModuleCard(
@@ -150,6 +210,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
                                         ],
                                       ),
                                     ),
+                                  ),
                                   ),
                                 );
                               },
