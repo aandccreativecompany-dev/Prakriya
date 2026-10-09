@@ -7,6 +7,7 @@ import '../models.dart';
 import '../services/extras.dart';
 import '../store.dart';
 import '../theme.dart';
+import '../nutrition_data.dart';
 import 'common.dart';
 
 // Lightweight "boost" cards added to the home sections: a focus timer, top-3
@@ -299,23 +300,25 @@ class _FocusTimerCardState extends State<FocusTimerCard> {
             ),
           ),
           const SizedBox(height: 12),
-          Row(
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
             children: [
               for (final m in _lengths)
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: ChoiceChip(
-                    label: Text('$m min'),
-                    selected: _minutes == m,
-                    onSelected: _running ? null : (_) => _pick(m),
-                  ),
+                ChoiceChip(
+                  label: Text('$m min'),
+                  selected: _minutes == m,
+                  onSelected: _running ? null : (_) => _pick(m),
                 ),
-              const Spacer(),
-              FilledButton(
-                onPressed: _running ? _stop : _start,
-                child: Text(_running ? 'Stop' : 'Start'),
-              ),
             ],
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              onPressed: _running ? _stop : _start,
+              child: Text(_running ? 'Stop' : 'Start focus session'),
+            ),
           ),
         ],
       );
@@ -994,6 +997,77 @@ class RepeatMealCard extends StatelessWidget {
   }
 }
 
+class NutritionSummaryCard extends StatelessWidget {
+  final VoidCallback onOpen;
+  const NutritionSummaryCard({super.key, required this.onOpen});
+
+  @override
+  Widget build(BuildContext context) {
+    return _Live((context, dark) {
+      final totals = dayNutrientTotals(DateTime.now());
+      final goal = extras.calorieGoal;
+      final kcal = totals['kcal'] ?? 0.0;
+      final female = extras.female;
+      Widget macro(String key, String short) {
+        final target = dailyTarget(key, female: female, kcalGoal: goal);
+        final value = totals[key] ?? 0.0;
+        return Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(short, style: body(11, Surfaces.muted(dark))),
+              Text('${formatAmount(value)} g',
+                  style: body(14, Surfaces.heading(dark), weight: FontWeight.w800)),
+              const SizedBox(height: 4),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(3),
+                child: LinearProgressIndicator(
+                  value: target <= 0 ? 0 : (value / target).clamp(0.0, 1.0).toDouble(),
+                  minHeight: 5,
+                  backgroundColor: Surfaces.accent(dark).withValues(alpha: 0.14),
+                  valueColor: AlwaysStoppedAnimation<Color>(Surfaces.accent(dark)),
+                ),
+              ),
+            ],
+          ),
+        );
+      }
+
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          BoosterHeader(
+            icon: Icons.restaurant_menu,
+            title: 'Nutrient tracker',
+            subtitle: '${kcal.round()} of $goal kcal today',
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              macro('protein', 'Protein'),
+              const SizedBox(width: 10),
+              macro('carbs', 'Carbs'),
+              const SizedBox(width: 10),
+              macro('fat', 'Fat'),
+              const SizedBox(width: 10),
+              macro('fiber', 'Fibre'),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: FilledButton.icon(
+              onPressed: onOpen,
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('Log food and see vitamins'),
+            ),
+          ),
+        ],
+      );
+    });
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Dashboard
 // ---------------------------------------------------------------------------
@@ -1091,20 +1165,28 @@ class WeeklyRecapCard extends StatelessWidget {
       }
       var tasksDone = 0;
       var focus = 0;
+      var meditated = 0;
       for (var i = 0; i < 7; i++) {
         tasksDone += store.tasksFor(_daysAgo(i)).where((t) => t.done).length;
         focus += extras.focusMinutesOn(_daysAgo(i));
+        meditated += extras.meditationMinutesOn(_daysAgo(i));
       }
       final spent = store.spentThisWeek;
       final goals = store.weeklyGoals;
       final goalsDone = goals.where((g) => g.done).length;
-      if (habits.isEmpty && tasksDone == 0 && focus == 0 && spent == 0 && goals.isEmpty) {
+      if (habits.isEmpty &&
+          tasksDone == 0 &&
+          focus == 0 &&
+          meditated == 0 &&
+          spent == 0 &&
+          goals.isEmpty) {
         return const SizedBox.shrink();
       }
       final stats = <(String, String)>[
         ('Habits', habits.isEmpty ? '--' : '$habitDone/${habits.length * 7}'),
         ('To-dos done', '$tasksDone'),
         ('Focus', '$focus min'),
+        ('Meditation', '$meditated min'),
         ('Spent', '₹${spent.toStringAsFixed(0)}'),
         ('Weekly goals', goals.isEmpty ? '--' : '$goalsDone/${goals.length}'),
       ];

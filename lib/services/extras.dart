@@ -28,6 +28,21 @@ class Extras extends ChangeNotifier {
   /// day key -> hours slept (the night leading into that day).
   final Map<String, double> sleep = <String, double>{};
 
+  /// day key -> meditation minutes completed that day.
+  final Map<String, int> meditationMinutes = <String, int>{};
+
+  /// Nutrient values per logged nutrition entry id (kcal, protein, ...).
+  final Map<String, Map<String, double>> entryNutrients =
+      <String, Map<String, double>>{};
+
+  int calorieGoal = 2000;
+  bool female = false;
+
+  /// Meditation sound choice, volume and the user's own stream link.
+  String meditationSound = 'rain';
+  double meditationVolume = 0.6;
+  String musicUrl = '';
+
   bool checklistDismissed = false;
 
   /// Monday day key of the week whose recap card was dismissed.
@@ -53,6 +68,33 @@ class Extras extends ChangeNotifier {
             s.forEach((dynamic k, dynamic v) {
               if (v is num) sleep['$k'] = v.toDouble();
             });
+          }
+          _readIntMap(decoded['meditationMinutes'], meditationMinutes);
+          entryNutrients.clear();
+          final en = decoded['entryNutrients'];
+          if (en is Map) {
+            en.forEach((dynamic id, dynamic values) {
+              if (values is Map) {
+                final inner = <String, double>{};
+                values.forEach((dynamic k, dynamic v) {
+                  if (v is num) inner['$k'] = v.toDouble();
+                });
+                entryNutrients['$id'] = inner;
+              }
+            });
+          }
+          final goal = decoded['calorieGoal'];
+          if (goal is num && goal >= 800 && goal <= 6000) {
+            calorieGoal = goal.toInt();
+          }
+          female = decoded['female'] == true;
+          if (decoded['meditationSound'] is String) {
+            meditationSound = decoded['meditationSound'] as String;
+          }
+          final vol = decoded['meditationVolume'];
+          if (vol is num) meditationVolume = vol.toDouble().clamp(0.0, 1.0).toDouble();
+          if (decoded['musicUrl'] is String) {
+            musicUrl = decoded['musicUrl'] as String;
           }
           checklistDismissed = decoded['checklistDismissed'] == true;
           recapDismissedWeek = decoded['recapDismissedWeek'] is String
@@ -102,6 +144,13 @@ class Extras extends ChangeNotifier {
           'gratitude': gratitude,
           'water': water,
           'sleep': sleep,
+          'meditationMinutes': meditationMinutes,
+          'entryNutrients': entryNutrients,
+          'calorieGoal': calorieGoal,
+          'female': female,
+          'meditationSound': meditationSound,
+          'meditationVolume': meditationVolume,
+          'musicUrl': musicUrl,
           'checklistDismissed': checklistDismissed,
           'recapDismissedWeek': recapDismissedWeek,
           'carriedOverOn': carriedOverOn,
@@ -141,6 +190,55 @@ class Extras extends ChangeNotifier {
     return count;
   }
 
+  // ---- Meditation ----
+
+  int meditationMinutesOn(DateTime day) => meditationMinutes[dayKey(day)] ?? 0;
+
+  int get totalMeditationMinutes =>
+      meditationMinutes.values.fold<int>(0, (sum, v) => sum + v);
+
+  void addMeditationMinutes(int minutes) {
+    meditationMinutes[todayKey] = (meditationMinutes[todayKey] ?? 0) + minutes;
+    _changed();
+  }
+
+  int get meditationStreak {
+    var cursor = DateTime.now();
+    if (meditationMinutesOn(cursor) == 0) {
+      cursor = cursor.subtract(const Duration(days: 1));
+    }
+    var count = 0;
+    while (meditationMinutesOn(cursor) > 0) {
+      count++;
+      cursor = cursor.subtract(const Duration(days: 1));
+    }
+    return count;
+  }
+
+  void setMeditationPrefs({String? sound, double? volume, String? url}) {
+    if (sound != null) meditationSound = sound;
+    if (volume != null) meditationVolume = volume.clamp(0.0, 1.0).toDouble();
+    if (url != null) musicUrl = url.trim();
+    _changed();
+  }
+
+  // ---- Nutrition ----
+
+  void setEntryNutrients(String entryId, Map<String, double> values) {
+    entryNutrients[entryId] = values;
+    _changed();
+  }
+
+  void removeEntryNutrients(String entryId) {
+    if (entryNutrients.remove(entryId) != null) _changed();
+  }
+
+  void setNutritionProfile({int? goal, bool? isFemale}) {
+    if (goal != null && goal >= 800 && goal <= 6000) calorieGoal = goal;
+    if (isFemale != null) female = isFemale;
+    _changed();
+  }
+
   // ---- Gratitude ----
 
   void setGratitude(String text) {
@@ -158,7 +256,7 @@ class Extras extends ChangeNotifier {
   int waterOn(DateTime day) => water[dayKey(day)] ?? 0;
 
   void changeWater(int delta) {
-    final next = ((water[todayKey] ?? 0) + delta).clamp(0, 30);
+    final next = ((water[todayKey] ?? 0) + delta).clamp(0, 30).toInt();
     water[todayKey] = next;
     _changed();
   }

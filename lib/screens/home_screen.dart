@@ -12,7 +12,9 @@ import 'exercise_timer_screen.dart';
 import 'habit_detail_screen.dart';
 import 'mind_map_screen.dart';
 import 'coach_chat_screen.dart';
+import 'meditation_screen.dart';
 import 'monthly_goals_screen.dart';
+import 'nutrition_tracker_screen.dart';
 import 'personal_care_screen.dart';
 import 'products_screen.dart';
 import 'reminders_screen.dart';
@@ -148,6 +150,10 @@ class _HomeScreenState extends State<HomeScreen> {
         pre.add(const ReachOutCard());
         break;
       case 'nutrition':
+        pre.add(NutritionSummaryCard(
+          onOpen: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const NutritionTrackerScreen())),
+        ));
         pre.add(const RepeatMealCard());
         break;
     }
@@ -257,6 +263,7 @@ class _HomeScreenState extends State<HomeScreen> {
           // their own tabs. Coach itself is further gated by
           // kCoachChatEnabled (see models.dart) — off for now, so its tab is
           // skipped entirely rather than shown disabled.
+          const MeditationScreen(),
           const ProductsScreen(embedded: true),
           if (kCoachChatEnabled) const CoachChatScreen(),
         ];
@@ -266,6 +273,10 @@ class _HomeScreenState extends State<HomeScreen> {
               icon: Icons.home_outlined, selectedIcon: Icons.home, label: 'Dashboard'),
           for (final section in primarySections)
             _NavItem(icon: _sectionIcon(section.key), label: _sectionShortLabel(section.key)),
+          const _NavItem(
+              icon: Icons.self_improvement_outlined,
+              selectedIcon: Icons.self_improvement,
+              label: 'Meditate'),
           const _NavItem(
               icon: Icons.shopping_bag_outlined,
               selectedIcon: Icons.shopping_bag,
@@ -732,8 +743,8 @@ class _QuickLaunchButton extends StatelessWidget {
 
   String get _summary {
     if (total == 0) return 'Nothing yet';
-    if (done == total) return 'All done $done/$total';
-    return '${total - done} open · $done done';
+    if (done == total) return 'All done';
+    return '${total - done} open';
   }
 
   @override
