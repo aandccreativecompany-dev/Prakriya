@@ -43,6 +43,16 @@ class Extras extends ChangeNotifier {
   double meditationVolume = 0.6;
   String musicUrl = '';
 
+  /// Start bell, interval chime (minutes, 0 = off) and breathing pattern key.
+  bool meditationStartBell = true;
+  int meditationInterval = 0;
+  String breathPattern = 'calm';
+
+  /// Home-screen widget look and extras: style key, progress bar, streak.
+  String widgetStyle = 'dusk';
+  bool widgetShowProgress = true;
+  bool widgetShowStreak = true;
+
   bool checklistDismissed = false;
 
   /// Monday day key of the week whose recap card was dismissed.
@@ -95,6 +105,23 @@ class Extras extends ChangeNotifier {
           if (vol is num) meditationVolume = vol.toDouble().clamp(0.0, 1.0).toDouble();
           if (decoded['musicUrl'] is String) {
             musicUrl = decoded['musicUrl'] as String;
+          }
+          if (decoded['meditationStartBell'] is bool) {
+            meditationStartBell = decoded['meditationStartBell'] as bool;
+          }
+          final interval = decoded['meditationInterval'];
+          if (interval is num) meditationInterval = interval.toInt();
+          if (decoded['breathPattern'] is String) {
+            breathPattern = decoded['breathPattern'] as String;
+          }
+          if (decoded['widgetStyle'] is String) {
+            widgetStyle = decoded['widgetStyle'] as String;
+          }
+          if (decoded['widgetShowProgress'] is bool) {
+            widgetShowProgress = decoded['widgetShowProgress'] as bool;
+          }
+          if (decoded['widgetShowStreak'] is bool) {
+            widgetShowStreak = decoded['widgetShowStreak'] as bool;
           }
           checklistDismissed = decoded['checklistDismissed'] == true;
           recapDismissedWeek = decoded['recapDismissedWeek'] is String
@@ -151,6 +178,12 @@ class Extras extends ChangeNotifier {
           'meditationSound': meditationSound,
           'meditationVolume': meditationVolume,
           'musicUrl': musicUrl,
+          'meditationStartBell': meditationStartBell,
+          'meditationInterval': meditationInterval,
+          'breathPattern': breathPattern,
+          'widgetStyle': widgetStyle,
+          'widgetShowProgress': widgetShowProgress,
+          'widgetShowStreak': widgetShowStreak,
           'checklistDismissed': checklistDismissed,
           'recapDismissedWeek': recapDismissedWeek,
           'carriedOverOn': carriedOverOn,
@@ -219,6 +252,22 @@ class Extras extends ChangeNotifier {
     if (sound != null) meditationSound = sound;
     if (volume != null) meditationVolume = volume.clamp(0.0, 1.0).toDouble();
     if (url != null) musicUrl = url.trim();
+    _changed();
+  }
+
+  void setMeditationExtras({bool? startBell, int? interval, String? pattern}) {
+    if (startBell != null) meditationStartBell = startBell;
+    if (interval != null) meditationInterval = interval;
+    if (pattern != null) breathPattern = pattern;
+    _changed();
+  }
+
+  // ---- Home screen widget ----
+
+  void setWidgetLook({String? style, bool? progress, bool? streak}) {
+    if (style != null) widgetStyle = style;
+    if (progress != null) widgetShowProgress = progress;
+    if (streak != null) widgetShowStreak = streak;
     _changed();
   }
 

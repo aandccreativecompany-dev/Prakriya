@@ -823,6 +823,18 @@ class VisionItem {
   /// means "none" (the original photo, untouched).
   String filter;
 
+  /// Life area key from `kVisionAreas` (career, health, ...). Empty = none.
+  String area;
+
+  /// A present-tense line to read when visualizing this dream.
+  String affirmation;
+
+  /// Target date as `yyyy-MM-dd`, or empty when there is none.
+  String targetDate;
+
+  /// True once the dream has come true.
+  bool achieved;
+
   VisionItem({
     required this.caption,
     this.colorIndex = 0,
@@ -835,6 +847,10 @@ class VisionItem {
     this.imageZoom = 1.0,
     this.frameStyle = '',
     this.filter = '',
+    this.area = '',
+    this.affirmation = '',
+    this.targetDate = '',
+    this.achieved = false,
   });
 
   Map<String, dynamic> toJson() => {
@@ -849,6 +865,10 @@ class VisionItem {
         'imageZoom': imageZoom,
         'frameStyle': frameStyle,
         'filter': filter,
+        'area': area,
+        'affirmation': affirmation,
+        'targetDate': targetDate,
+        'achieved': achieved,
       };
 
   static VisionItem fromJson(Map<String, dynamic> json) => VisionItem(
@@ -863,6 +883,12 @@ class VisionItem {
         imageZoom: ((json['imageZoom'] ?? 1.0) as num).toDouble(),
         frameStyle: (json['frameStyle'] ?? '') as String,
         filter: (json['filter'] ?? '') as String,
+        area: json['area'] is String ? json['area'] as String : '',
+        affirmation:
+            json['affirmation'] is String ? json['affirmation'] as String : '',
+        targetDate:
+            json['targetDate'] is String ? json['targetDate'] as String : '',
+        achieved: json['achieved'] == true,
       );
 }
 

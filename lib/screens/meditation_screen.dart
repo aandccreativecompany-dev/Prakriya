@@ -63,6 +63,7 @@ class _MeditationScreenState extends State<MeditationScreen> {
                             paused: meditation.paused,
                             clock: meditation.clock,
                             dark: dark,
+                            patternKey: extras.breathPattern,
                           ),
                         ),
                         const SizedBox(height: 14),
@@ -122,19 +123,14 @@ class _MeditationScreenState extends State<MeditationScreen> {
                         ],
                         const SizedBox(height: 22),
                         Text('SOUND', style: label(Surfaces.muted(dark))),
-                        const SizedBox(height: 8),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 4,
-                          children: [
-                            for (final s in kMeditationSounds)
-                              ChoiceChip(
-                                label: Text(s.label),
-                                selected: selected == s.key,
-                                onSelected: (_) => meditation.chooseSound(s.key),
-                              ),
-                          ],
-                        ),
+                        const SizedBox(height: 4),
+                        for (final category in kMeditationCategories)
+                          _SoundGroup(
+                            category: category,
+                            selected: selected,
+                            playing: meditation.musicPlaying,
+                            dark: dark,
+                          ),
                         if (selected == 'link') ...[
                           const SizedBox(height: 10),
                           TextField(
@@ -176,6 +172,56 @@ class _MeditationScreenState extends State<MeditationScreen> {
                                 ? 'Stop sound'
                                 : 'Play sound only'),
                           ),
+                        ),
+                        const SizedBox(height: 22),
+                        Text('BREATHING RHYTHM', style: label(Surfaces.muted(dark))),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 4,
+                          children: [
+                            for (final p in kBreathPatterns)
+                              ChoiceChip(
+                                label: Text(p.name),
+                                selected: extras.breathPattern == p.key,
+                                onSelected: (_) =>
+                                    extras.setMeditationExtras(pattern: p.key),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Text(breathPatternFor(extras.breathPattern).blurb,
+                            style: body(12, Surfaces.muted(dark))),
+                        const SizedBox(height: 18),
+                        Text('SESSION', style: label(Surfaces.muted(dark))),
+                        const SizedBox(height: 4),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          dense: true,
+                          title: Text('Soft bell at the start',
+                              style: body(13.5, Surfaces.bodyText(dark),
+                                  weight: FontWeight.w500)),
+                          value: extras.meditationStartBell,
+                          activeTrackColor: Surfaces.accent(dark),
+                          onChanged: (v) =>
+                              extras.setMeditationExtras(startBell: v),
+                        ),
+                        const SizedBox(height: 4),
+                        Text('Interval chime', style: body(13.5, Surfaces.bodyText(dark),
+                            weight: FontWeight.w500)),
+                        const SizedBox(height: 6),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 4,
+                          children: [
+                            for (final every in const [0, 3, 5, 10])
+                              ChoiceChip(
+                                label: Text(every == 0 ? 'Off' : 'Every $every min'),
+                                selected: extras.meditationInterval == every,
+                                onSelected: (_) =>
+                                    extras.setMeditationExtras(interval: every),
+                              ),
+                          ],
                         ),
                         const SizedBox(height: 22),
                         ModuleCard(
@@ -235,16 +281,66 @@ class _Stat extends StatelessWidget {
   }
 }
 
+class _SoundGroup extends StatelessWidget {
+  final String category;
+  final String selected;
+  final bool playing;
+  final bool dark;
+  const _SoundGroup({
+    required this.category,
+    required this.selected,
+    required this.playing,
+    required this.dark,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final sounds =
+        kMeditationSounds.where((s) => s.category == category).toList();
+    if (sounds.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(category,
+              style: body(12, Surfaces.eyebrow(dark), weight: FontWeight.w700)),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            children: [
+              for (final s in sounds)
+                ChoiceChip(
+                  avatar: Icon(
+                    selected == s.key && playing ? Icons.graphic_eq : s.icon,
+                    size: 16,
+                  ),
+                  label: Text(s.label),
+                  showCheckmark: false,
+                  selected: selected == s.key,
+                  onSelected: (_) => meditation.chooseSound(s.key),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _BreathingOrb extends StatefulWidget {
   final bool active;
   final bool paused;
   final String clock;
   final bool dark;
+  final String patternKey;
   const _BreathingOrb({
     required this.active,
     required this.paused,
     required this.clock,
     required this.dark,
+    required this.patternKey,
   });
 
   @override
@@ -253,22 +349,32 @@ class _BreathingOrb extends StatefulWidget {
 
 class _BreathingOrbState extends State<_BreathingOrb>
     with SingleTickerProviderStateMixin {
+  late BreathPattern _pattern = breathPatternFor(widget.patternKey);
   late final AnimationController _controller = AnimationController(
     vsync: this,
-    duration: const Duration(seconds: 5),
+    duration: Duration(seconds: _pattern.cycleSeconds),
   );
 
   @override
   void initState() {
     super.initState();
-    if (widget.active) _controller.repeat(reverse: true);
+    if (widget.active) _controller.repeat();
   }
 
   @override
   void didUpdateWidget(covariant _BreathingOrb oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.patternKey != widget.patternKey) {
+      _pattern = breathPatternFor(widget.patternKey);
+      _controller.duration = Duration(seconds: _pattern.cycleSeconds);
+      if (widget.active) {
+        _controller.repeat();
+      } else {
+        _controller.value = 0;
+      }
+    }
     if (widget.active && !_controller.isAnimating) {
-      _controller.repeat(reverse: true);
+      _controller.repeat();
     } else if (!widget.active && _controller.isAnimating) {
       _controller.stop();
       _controller.value = 0;
@@ -287,15 +393,37 @@ class _BreathingOrbState extends State<_BreathingOrb>
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, _) {
-        final eased = Curves.easeInOut.transform(_controller.value);
+        final cycle = _pattern.cycleSeconds;
+        final elapsed = _controller.value * cycle;
+        var level = 0.0;
+        var acc = 0.0;
+        var hint = _pattern.phases.last.label;
+        var secondsLeft = 0;
+        for (final p in _pattern.phases) {
+          final end = acc + p.seconds;
+          if (elapsed < end) {
+            final pr = (elapsed - acc) / p.seconds;
+            if (p.grow) {
+              level = pr;
+            } else if (p.shrink) {
+              level = 1 - pr;
+            }
+            hint = p.label;
+            secondsLeft = (end - elapsed).ceil();
+            break;
+          } else {
+            if (p.grow) level = 1;
+            if (p.shrink) level = 0;
+            acc = end;
+          }
+        }
+        final eased = Curves.easeInOut.transform(level.clamp(0.0, 1.0).toDouble());
         final scale = 0.74 + 0.26 * eased;
-        String hint;
+        String caption;
         if (!widget.active) {
-          hint = widget.paused ? 'Paused' : 'Ready when you are';
+          caption = widget.paused ? 'Paused' : 'Ready when you are';
         } else {
-          hint = _controller.status == AnimationStatus.reverse
-              ? 'Breathe out'
-              : 'Breathe in';
+          caption = secondsLeft > 0 ? '$hint · $secondsLeft' : hint;
         }
         return SizedBox(
           width: 240,
@@ -326,7 +454,7 @@ class _BreathingOrbState extends State<_BreathingOrb>
                   Text(widget.clock,
                       style: display(34, Surfaces.heading(widget.dark))),
                   const SizedBox(height: 4),
-                  Text(hint,
+                  Text(caption,
                       style: body(13, Surfaces.muted(widget.dark),
                           weight: FontWeight.w600)),
                 ],

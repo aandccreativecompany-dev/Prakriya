@@ -14,9 +14,11 @@ import 'package:share_plus/share_plus.dart';
 import '../models.dart';
 import '../store.dart';
 import '../theme.dart';
+import '../vision_data.dart';
 import '../widgets/common.dart';
 import 'shared_vision_board_screen.dart';
 import 'vision_layouts_screen.dart';
+import 'vision_visualize_screen.dart';
 
 /// A collage of what the user is working toward — a picked photo (saved from
 /// Pinterest, a screenshot, anything in the gallery) with a word or sentence
@@ -33,14 +35,30 @@ class VisionBoardScreen extends StatelessWidget {
   // find the same RepaintBoundary to capture.
   static final GlobalKey _boardKey = GlobalKey();
 
+  /// Which life area is shown: 'all', an area key, or 'achieved'.
+  static final ValueNotifier<String> _filter = ValueNotifier<String>('all');
+
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
 
     return AnimatedBuilder(
-      animation: store,
+      animation: Listenable.merge(<Listenable>[store, _filter]),
       builder: (context, _) {
         final items = store.visionItems;
+        var filter = _filter.value;
+        List<VisionItem> shown = items;
+        if (filter == 'achieved') {
+          shown = items.where((i) => i.achieved).toList();
+        } else if (filter != 'all') {
+          shown = items.where((i) => i.area == filter).toList();
+        }
+        if (shown.isEmpty && items.isNotEmpty) {
+          // The chosen filter no longer matches anything: show everything.
+          filter = 'all';
+          shown = items;
+        }
+        final achievedCount = items.where((i) => i.achieved).length;
         return Scaffold(
           body: Container(
             decoration: Surfaces.pageBackground(dark),
@@ -51,7 +69,9 @@ class VisionBoardScreen extends StatelessWidget {
                     ScreenHeader(
                       icon: Icons.grid_view_rounded,
                       title: 'Vision board',
-                      subtitle: 'Pin a photo with a word or sentence, or just the words.',
+                      subtitle: items.isEmpty
+                          ? 'Pin a photo with a word or sentence, or just the words.'
+                          : '$achievedCount of ${items.length} dreams achieved',
                       actions: [
                         IconButton(
                           tooltip: 'Share',
@@ -64,11 +84,37 @@ class VisionBoardScreen extends StatelessWidget {
                         ),
                       ],
                     ),
-                    if (items.isNotEmpty)
+                    if (items.isNotEmpty) ...[
                       Padding(
                         padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
                         child: Row(
                           children: [
+                            InkWell(
+                              borderRadius: BorderRadius.circular(14),
+                              onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                                  builder: (_) =>
+                                      VisionVisualizeScreen(items: List<VisionItem>.of(shown)))),
+                              child: Container(
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(14),
+                                  color: Surfaces.accent(dark),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.play_arrow_rounded,
+                                        size: 18, color: dark ? Brand.deep : Colors.white),
+                                    const SizedBox(width: 6),
+                                    Text('Visualize',
+                                        style: body(12.5, dark ? Brand.deep : Colors.white,
+                                            weight: FontWeight.w800)),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
                             Expanded(
                               child: InkWell(
                                 borderRadius: BorderRadius.circular(14),
@@ -91,7 +137,7 @@ class VisionBoardScreen extends StatelessWidget {
                                       Expanded(
                                         child: Text(
                                           store.visionBoardLayoutName == null
-                                              ? 'Browse 25 board layouts'
+                                              ? 'Layouts'
                                               : 'Layout: ${store.visionBoardLayoutName}',
                                           style: body(12.5, Surfaces.accent(dark),
                                               weight: FontWeight.w700),
@@ -124,6 +170,47 @@ class VisionBoardScreen extends StatelessWidget {
                           ],
                         ),
                       ),
+                      SizedBox(
+                        height: 44,
+                        child: ListView(
+                          scrollDirection: Axis.horizontal,
+                          padding: const EdgeInsets.fromLTRB(20, 6, 20, 4),
+                          children: [
+                            _FilterChip(
+                              label: 'All',
+                              selected: filter == 'all',
+                              dark: dark,
+                              onTap: () => _filter.value = 'all',
+                            ),
+                            for (final area in kVisionAreas)
+                              if (items.any((i) => i.area == area.key))
+                                _FilterChip(
+                                  label: area.label,
+                                  icon: area.icon,
+                                  color: area.color,
+                                  selected: filter == area.key,
+                                  dark: dark,
+                                  onTap: () => _filter.value = area.key,
+                                ),
+                            if (achievedCount > 0)
+                              _FilterChip(
+                                label: 'Achieved',
+                                icon: Icons.check_circle_outline,
+                                selected: filter == 'achieved',
+                                dark: dark,
+                                onTap: () => _filter.value = 'achieved',
+                              ),
+                            _FilterChip(
+                              label: 'Templates',
+                              icon: Icons.auto_awesome_outlined,
+                              selected: false,
+                              dark: dark,
+                              onTap: () => _showTemplates(context),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 8),
                     Expanded(
                       child: items.isEmpty
@@ -148,6 +235,15 @@ class VisionBoardScreen extends StatelessWidget {
                                     GoldButton(
                                         labelText: 'Add your first tile',
                                         onPressed: () => _addItem(context)),
+                                    const SizedBox(height: 10),
+                                    TextButton.icon(
+                                      onPressed: () => _showTemplates(context),
+                                      icon: Icon(Icons.auto_awesome_outlined,
+                                          size: 18, color: Surfaces.accent(dark)),
+                                      label: Text('Start from a template',
+                                          style: body(13.5, Surfaces.accent(dark),
+                                              weight: FontWeight.w700)),
+                                    ),
                                   ],
                                 ),
                               ),
@@ -175,15 +271,15 @@ class VisionBoardScreen extends StatelessWidget {
                                         mainAxisSpacing: 14,
                                         crossAxisSpacing: 14,
                                         children: [
-                                          for (var i = 0; i < items.length; i++)
+                                          for (var i = 0; i < shown.length; i++)
                                             StaggeredGridTile.count(
-                                              crossAxisCellCount: items[i].spanX.clamp(1, 2),
-                                              mainAxisCellCount: items[i].spanY.clamp(1, 2),
+                                              crossAxisCellCount: shown[i].spanX.clamp(1, 2),
+                                              mainAxisCellCount: shown[i].spanY.clamp(1, 2),
                                               child: _VisionTile(
-                                                item: items[i],
+                                                item: shown[i],
                                                 index: i,
                                                 color: _hatchColors[
-                                                    items[i].colorIndex % _hatchColors.length],
+                                                    shown[i].colorIndex % _hatchColors.length],
                                                 dark: dark,
                                               ),
                                             ),
@@ -207,8 +303,11 @@ class VisionBoardScreen extends StatelessWidget {
 
   Future<void> _addItem(BuildContext context) async {
     final controller = TextEditingController();
+    final affirmationController = TextEditingController();
     final dark = Theme.of(context).brightness == Brightness.dark;
     String? pickedPath;
+    var area = '';
+    var targetDate = '';
 
     final result = await showModalBottomSheet<bool>(
       context: context,
@@ -280,6 +379,32 @@ class VisionBoardScreen extends StatelessWidget {
                   decoration: const InputDecoration(
                       hintText: 'A word or sentence for this tile'),
                 ),
+                const SizedBox(height: 16),
+                Text('LIFE AREA', style: label(Surfaces.eyebrow(dark))),
+                const SizedBox(height: 8),
+                _AreaChips(
+                  selected: area,
+                  dark: dark,
+                  onChanged: (v) => setState(() => area = v),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: affirmationController,
+                  textCapitalization: TextCapitalization.sentences,
+                  style: body(14, Surfaces.bodyText(dark)),
+                  decoration: const InputDecoration(
+                      hintText: 'An affirmation, in the present tense (optional)'),
+                ),
+                const SizedBox(height: 12),
+                _DateRow(
+                  value: targetDate,
+                  dark: dark,
+                  onPick: () async {
+                    final picked = await _pickVisionDate(context, targetDate);
+                    if (picked != null) setState(() => targetDate = picked);
+                  },
+                  onClear: () => setState(() => targetDate = ''),
+                ),
                       ],
                     ),
                   ),
@@ -299,9 +424,54 @@ class VisionBoardScreen extends StatelessWidget {
     );
 
     if (result == true) {
-      await store.addVisionItem(controller.text, imagePath: pickedPath);
+      await store.addVisionItem(
+        controller.text,
+        imagePath: pickedPath,
+        area: area,
+        affirmation: affirmationController.text,
+        targetDate: targetDate,
+      );
       if (context.mounted) toastSaved(context);
     }
+  }
+
+  Future<void> _showTemplates(BuildContext context) async {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final chosen = await showModalBottomSheet<VisionTemplate>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
+        decoration: BoxDecoration(
+          color: Surfaces.sheet(dark),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Start from a template', style: display(17, Surfaces.heading(dark))),
+            const SizedBox(height: 4),
+            Text('Adds ready-made tiles with affirmations. Edit or remove any of them.',
+                style: body(12.5, Surfaces.muted(dark))),
+            const SizedBox(height: 10),
+            for (final t in kVisionTemplates)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.auto_awesome_outlined, color: Surfaces.accent(dark)),
+                title: Text(t.name,
+                    style: body(14, Surfaces.bodyText(dark), weight: FontWeight.w600)),
+                subtitle: Text('${t.tiles.length} tiles · ${t.blurb}',
+                    style: body(11.5, Surfaces.muted(dark))),
+                onTap: () => Navigator.pop(context, t),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (chosen == null) return;
+    await store.addVisionTemplate(chosen.tiles);
+    if (context.mounted) toastSaved(context, label: '${chosen.tiles.length} tiles added');
   }
 
   /// Opens the device gallery and copies the chosen image into app-local
@@ -520,7 +690,9 @@ class _VisionTile extends StatelessWidget {
       clipper: _shapeClipper(shape),
       child: Container(
         decoration: BoxDecoration(
-          border: Border.all(color: color.withValues(alpha: 0.35), width: 1.5),
+          border: Border.all(
+              color: item.achieved ? Brand.gold : color.withValues(alpha: 0.35),
+              width: item.achieved ? 2.5 : 1.5),
           color: color.withValues(alpha: dark ? 0.08 : 0.1),
         ),
         child: Stack(
@@ -562,6 +734,12 @@ class _VisionTile extends StatelessWidget {
               top: 6,
               right: 6,
               child: Icon(Icons.tune, size: 15, color: Colors.white.withValues(alpha: 0.85)),
+            ),
+            Positioned(
+              top: 6,
+              left: 8,
+              right: 28,
+              child: _TileBadges(item: item),
             ),
           ],
         ),
@@ -701,6 +879,11 @@ class _TileCustomizerSheetState extends State<_TileCustomizerSheet> {
   late double _zoom;
   late String _frameStyle;
   late String _filter;
+  late final TextEditingController _captionController;
+  late final TextEditingController _affirmationController;
+  late String _area;
+  late String _targetDate;
+  late bool _achieved;
 
   static const _sizeOptions = [
     ('Small', 1, 1),
@@ -720,6 +903,18 @@ class _TileCustomizerSheetState extends State<_TileCustomizerSheet> {
     _zoom = widget.item.imageZoom;
     _frameStyle = widget.item.frameStyle.isEmpty ? 'none' : widget.item.frameStyle;
     _filter = widget.item.filter.isEmpty ? 'none' : widget.item.filter;
+    _captionController = TextEditingController(text: widget.item.caption);
+    _affirmationController = TextEditingController(text: widget.item.affirmation);
+    _area = widget.item.area;
+    _targetDate = widget.item.targetDate;
+    _achieved = widget.item.achieved;
+  }
+
+  @override
+  void dispose() {
+    _captionController.dispose();
+    _affirmationController.dispose();
+    super.dispose();
   }
 
   Future<void> _save() async {
@@ -734,6 +929,14 @@ class _TileCustomizerSheetState extends State<_TileCustomizerSheet> {
       imageZoom: _zoom,
       frameStyle: _frameStyle,
       filter: _filter,
+    );
+    await store.updateVisionItemDetails(
+      widget.item,
+      caption: _captionController.text,
+      area: _area,
+      affirmation: _affirmationController.text,
+      targetDate: _targetDate,
+      achieved: _achieved,
     );
     if (mounted) {
       Navigator.pop(context);
@@ -769,6 +972,50 @@ class _TileCustomizerSheetState extends State<_TileCustomizerSheet> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+              Text('WORDS', style: label(Surfaces.eyebrow(dark))),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _captionController,
+                textCapitalization: TextCapitalization.sentences,
+                style: body(14, Surfaces.bodyText(dark)),
+                decoration: const InputDecoration(hintText: 'A word or sentence'),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _affirmationController,
+                textCapitalization: TextCapitalization.sentences,
+                style: body(14, Surfaces.bodyText(dark)),
+                decoration: const InputDecoration(
+                    hintText: 'Affirmation, in the present tense (optional)'),
+              ),
+              const SizedBox(height: 16),
+              Text('LIFE AREA', style: label(Surfaces.eyebrow(dark))),
+              const SizedBox(height: 8),
+              _AreaChips(
+                selected: _area,
+                dark: dark,
+                onChanged: (v) => setState(() => _area = v),
+              ),
+              const SizedBox(height: 12),
+              _DateRow(
+                value: _targetDate,
+                dark: dark,
+                onPick: () async {
+                  final picked = await _pickVisionDate(context, _targetDate);
+                  if (picked != null && mounted) setState(() => _targetDate = picked);
+                },
+                onClear: () => setState(() => _targetDate = ''),
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                title: Text('This has come true',
+                    style: body(13.5, Surfaces.bodyText(dark), weight: FontWeight.w600)),
+                value: _achieved,
+                activeTrackColor: Surfaces.accent(dark),
+                onChanged: (v) => setState(() => _achieved = v),
+              ),
+              const SizedBox(height: 12),
               if (widget.item.imagePath != null) ...[
                 Text('DRAG TO REPOSITION · PINCH TO ZOOM',
                     style: label(Surfaces.eyebrow(dark))),
@@ -894,6 +1141,203 @@ class _TileCustomizerSheetState extends State<_TileCustomizerSheet> {
       ),
     );
   }
+}
+
+/// Small badges on a tile: its life area, and either a countdown to the
+/// target date or an "Achieved" mark.
+class _TileBadges extends StatelessWidget {
+  final VisionItem item;
+  const _TileBadges({required this.item});
+
+  @override
+  Widget build(BuildContext context) {
+    final area = visionAreaFor(item.area);
+    final countdown = item.achieved ? '' : visionCountdownLabel(item);
+    if (area == null && countdown.isEmpty && !item.achieved) {
+      return const SizedBox.shrink();
+    }
+    return Wrap(
+      spacing: 4,
+      runSpacing: 4,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        if (area != null)
+          Container(
+            width: 22,
+            height: 22,
+            decoration: BoxDecoration(color: area.color, shape: BoxShape.circle),
+            child: Icon(area.icon, size: 13, color: Colors.white),
+          ),
+        if (item.achieved)
+          _pill('Achieved', Brand.gold, Brand.deep)
+        else if (countdown.isNotEmpty)
+          _pill(countdown, Colors.black.withValues(alpha: 0.55), Colors.white),
+      ],
+    );
+  }
+
+  Widget _pill(String text, Color bg, Color fg) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(10)),
+      child: Text(text,
+          style: TextStyle(color: fg, fontSize: 10, fontWeight: FontWeight.w800)),
+    );
+  }
+}
+
+class _FilterChip extends StatelessWidget {
+  final String label;
+  final IconData? icon;
+  final Color? color;
+  final bool selected;
+  final bool dark;
+  final VoidCallback onTap;
+  const _FilterChip({
+    required this.label,
+    required this.selected,
+    required this.dark,
+    required this.onTap,
+    this.icon,
+    this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = color ?? Surfaces.accent(dark);
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: selected ? accent.withValues(alpha: 0.18) : Colors.transparent,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+                color: selected ? accent : Surfaces.accentBorder(dark),
+                width: selected ? 1.4 : 1),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (icon != null) ...[
+                Icon(icon, size: 14, color: selected ? accent : Surfaces.muted(dark)),
+                const SizedBox(width: 5),
+              ],
+              Text(label,
+                  style: body(11.5, selected ? accent : Surfaces.muted(dark),
+                      weight: FontWeight.w700)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Life-area picker. Tapping the selected area again clears it.
+class _AreaChips extends StatelessWidget {
+  final String selected;
+  final bool dark;
+  final ValueChanged<String> onChanged;
+  const _AreaChips(
+      {required this.selected, required this.dark, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final a in kVisionAreas)
+          InkWell(
+            borderRadius: BorderRadius.circular(20),
+            onTap: () => onChanged(selected == a.key ? '' : a.key),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+              decoration: BoxDecoration(
+                color: selected == a.key
+                    ? a.color.withValues(alpha: 0.18)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                    color: selected == a.key ? a.color : Surfaces.accentBorder(dark),
+                    width: selected == a.key ? 1.4 : 1),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(a.icon,
+                      size: 14,
+                      color: selected == a.key ? a.color : Surfaces.muted(dark)),
+                  const SizedBox(width: 5),
+                  Text(a.label,
+                      style: body(11.5,
+                          selected == a.key ? a.color : Surfaces.muted(dark),
+                          weight: FontWeight.w600)),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _DateRow extends StatelessWidget {
+  final String value;
+  final bool dark;
+  final VoidCallback onPick;
+  final VoidCallback onClear;
+  const _DateRow(
+      {required this.value,
+      required this.dark,
+      required this.onPick,
+      required this.onClear});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed: onPick,
+            icon: const Icon(Icons.event_outlined, size: 18),
+            label: Text(
+              value.isEmpty
+                  ? 'Set a target date (optional)'
+                  : 'By ${formatVisionDate(value)}',
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ),
+        if (value.isNotEmpty)
+          IconButton(
+            tooltip: 'Clear date',
+            onPressed: onClear,
+            icon: Icon(Icons.close, size: 18, color: Surfaces.muted(dark)),
+          ),
+      ],
+    );
+  }
+}
+
+/// Picks a future date and returns it as `yyyy-MM-dd`, or null if cancelled.
+Future<String?> _pickVisionDate(BuildContext context, String current) async {
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  var initial = DateTime.tryParse(current) ?? today.add(const Duration(days: 90));
+  if (initial.isBefore(today)) initial = today;
+  final picked = await showDatePicker(
+    context: context,
+    initialDate: initial,
+    firstDate: today,
+    lastDate: DateTime(today.year + 15, 12, 31),
+  );
+  if (picked == null) return null;
+  return dayKey(picked);
 }
 
 class _Chip extends StatelessWidget {

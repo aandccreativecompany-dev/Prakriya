@@ -983,14 +983,55 @@ class Store extends ChangeNotifier {
 
   List<VisionItem> get visionItems => _state.visionItems;
 
-  Future<void> addVisionItem(String caption, {String? imagePath}) async {
+  Future<void> addVisionItem(
+    String caption, {
+    String? imagePath,
+    String area = '',
+    String affirmation = '',
+    String targetDate = '',
+  }) async {
     final trimmed = caption.trim();
     if (trimmed.isEmpty && imagePath == null) return;
     _state.visionItems.add(VisionItem(
       caption: trimmed,
       colorIndex: _state.visionItems.length,
       imagePath: imagePath,
+      area: area,
+      affirmation: affirmation.trim(),
+      targetDate: targetDate,
     ));
+    await _commit();
+  }
+
+  /// Adds several caption-only tiles at once (used by the starter templates).
+  Future<void> addVisionTemplate(
+      List<(String caption, String area, String affirmation)> tiles) async {
+    for (final t in tiles) {
+      _state.visionItems.add(VisionItem(
+        caption: t.$1,
+        colorIndex: _state.visionItems.length,
+        area: t.$2,
+        affirmation: t.$3,
+      ));
+    }
+    await _commit();
+  }
+
+  /// Edits a tile's words and meaning (not its look): caption, life area,
+  /// affirmation, target date and whether it has come true.
+  Future<void> updateVisionItemDetails(
+    VisionItem item, {
+    String? caption,
+    String? area,
+    String? affirmation,
+    String? targetDate,
+    bool? achieved,
+  }) async {
+    if (caption != null) item.caption = caption.trim();
+    if (area != null) item.area = area;
+    if (affirmation != null) item.affirmation = affirmation.trim();
+    if (targetDate != null) item.targetDate = targetDate;
+    if (achieved != null) item.achieved = achieved;
     await _commit();
   }
 
@@ -1433,6 +1474,13 @@ class Store extends ChangeNotifier {
     } else {
       _state.widgetHabitIds.add(habitId);
     }
+    await _commit();
+  }
+
+  /// Replaces the widget's habit selection in one go. An empty list means
+  /// "all habits".
+  Future<void> setWidgetHabitIds(List<String> ids) async {
+    _state.widgetHabitIds = List<String>.from(ids);
     await _commit();
   }
 

@@ -6,7 +6,6 @@ import '../app_version.dart';
 import '../models.dart';
 import '../services/auth_service.dart';
 import '../services/cloud_sync.dart';
-import '../services/home_widget_service.dart';
 import '../store.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -14,6 +13,7 @@ import 'feedback_screen.dart';
 import 'lock_screen.dart';
 import 'module_picker_screen.dart';
 import 'weekly_review_screen.dart';
+import 'widget_studio_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -469,99 +469,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           Text('HOME SCREEN WIDGET', style: label(Surfaces.muted(dark))),
                           const SizedBox(height: 12),
                           ModuleCard(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Add the Prakriyā widget to your Android home screen, then choose what shows on it.',
-                                  textAlign: TextAlign.justify,
-                                  style: body(12.5, Surfaces.muted(dark)).copyWith(height: 1.4),
-                                ),
-                                const SizedBox(height: 14),
-                                _WidgetToggleRow(
-                                  label: "Today's habits checklist",
-                                  value: store.widgetShowHabits,
-                                  onChanged: (v) => store.setWidgetShowHabits(v),
-                                ),
-                                _divider(dark),
-                                _WidgetToggleRow(
-                                  label: 'Top to-do / priority',
-                                  value: store.widgetShowPriorities,
-                                  onChanged: (v) => store.setWidgetShowPriorities(v),
-                                ),
-                                _divider(dark),
-                                _WidgetToggleRow(
-                                  label: "Today's mantra",
-                                  value: store.widgetShowMantra,
-                                  onChanged: (v) => store.setWidgetShowMantra(v),
-                                ),
-                                if (store.widgetShowHabits && store.habits.isNotEmpty) ...[
-                                  _divider(dark),
-                                  const SizedBox(height: 4),
-                                  Text('WHICH HABITS SHOW',
-                                      style: label(Surfaces.eyebrow(dark))),
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    'Pick specific habits, or leave all selected — the widget shows up to 5.',
-                                    style: body(11.5, Surfaces.muted(dark)),
-                                  ),
-                                  const SizedBox(height: 10),
-                                  Wrap(
-                                    spacing: 8,
-                                    runSpacing: 8,
-                                    children: [
-                                      for (final h in store.habits)
-                                        InkWell(
-                                          borderRadius: BorderRadius.circular(20),
-                                          onTap: () async {
-                                            await store.toggleWidgetHabit(h.id);
-                                            if (context.mounted) toastSaved(context);
-                                          },
-                                          child: Container(
-                                            padding: const EdgeInsets.symmetric(
-                                                horizontal: 12, vertical: 7),
-                                            decoration: BoxDecoration(
-                                              color: store.widgetHabitSelected(h.id)
-                                                  ? Surfaces.accent(dark)
-                                                      .withValues(alpha: 0.16)
-                                                  : Colors.transparent,
-                                              borderRadius: BorderRadius.circular(20),
-                                              border: Border.all(
-                                                color: store.widgetHabitSelected(h.id)
-                                                    ? Surfaces.accent(dark)
-                                                    : Surfaces.accentBorder(dark),
-                                              ),
-                                            ),
-                                            child: Text(h.name,
-                                                style: body(
-                                                    11.5,
-                                                    store.widgetHabitSelected(h.id)
-                                                        ? Surfaces.accent(dark)
-                                                        : Surfaces.muted(dark),
-                                                    weight: FontWeight.w600)),
-                                          ),
-                                        ),
-                                    ],
-                                  ),
-                                ],
-                                const SizedBox(height: 14),
-                                TextButton.icon(
-                                  onPressed: () async {
-                                    await HomeWidgetService.instance.forceRefresh();
-                                    if (context.mounted) {
-                                      toastSaved(context, label: 'Widget refreshed');
-                                    }
-                                  },
-                                  style: TextButton.styleFrom(
-                                      padding: EdgeInsets.zero,
-                                      alignment: Alignment.centerLeft),
-                                  icon: Icon(Icons.refresh,
-                                      size: 16, color: Surfaces.accent(dark)),
-                                  label: Text('Refresh widget now',
-                                      style: body(13, Surfaces.accent(dark),
-                                          weight: FontWeight.w600)),
-                                ),
-                              ],
+                            padding: EdgeInsets.zero,
+                            child: _NavRow(
+                              icon: Icons.widgets_outlined,
+                              title: 'Widget studio',
+                              subtitle:
+                                  'Pick a look, choose what shows, add it to your home screen',
+                              onTap: () => Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                      builder: (_) => const WidgetStudioScreen())),
                             ),
                           ),
                           const SizedBox(height: 22),
@@ -720,37 +636,6 @@ Text('Prakriyā $kAppVersion',
           ),
         );
       },
-    );
-  }
-}
-
-class _WidgetToggleRow extends StatelessWidget {
-  final String label;
-  final bool value;
-  final Future<void> Function(bool) onChanged;
-  const _WidgetToggleRow({required this.label, required this.value, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    final dark = Theme.of(context).brightness == Brightness.dark;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(label,
-                style: body(13.5, Surfaces.bodyText(dark), weight: FontWeight.w500)),
-          ),
-          Switch(
-            value: value,
-            activeTrackColor: Surfaces.accent(dark),
-            onChanged: (v) async {
-              await onChanged(v);
-              if (context.mounted) toastSaved(context);
-            },
-          ),
-        ],
-      ),
     );
   }
 }
