@@ -7,8 +7,9 @@ import '../store.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 
-/// Design the Android home-screen widget: pick a look, choose what it shows,
-/// see a live preview (tap a habit to tick it) and add it to the home screen.
+/// Design the Android home-screen widget: choose what it shows and in what
+/// order, edit today's to-do list, and see an exact live preview. The preview
+/// is interactive: tick tasks and habits, tap a task to edit or delete it.
 class WidgetStudioScreen extends StatefulWidget {
   const WidgetStudioScreen({super.key});
 
@@ -28,7 +29,29 @@ class _WidgetStudioScreenState extends State<WidgetStudioScreen> {
     });
   }
 
-  Future<void> _toggleHabit(Habit h) async {
+  Future<void> _addTask() async {
+    final result = await showDialog<_TaskEdit>(
+      context: context,
+      builder: (_) => const _TaskDialog(),
+    );
+    if (result == null || result.delete) return;
+    await store.addTask(result.text);
+  }
+
+  Future<void> _editTask(WidgetTaskLine line) async {
+    final result = await showDialog<_TaskEdit>(
+      context: context,
+      builder: (_) => _TaskDialog(initial: line.task.title),
+    );
+    if (result == null) return;
+    if (result.delete) {
+      await store.removeTask(line.index);
+    } else {
+      await store.renameTask(line.index, result.text);
+    }
+  }
+
+  Future<void> _toggleHabitInWidget(Habit h) async {
     final all = store.habits.map((x) => x.id).toList();
     final current = all.where(store.widgetHabitSelected).toSet();
     if (current.contains(h.id)) {
@@ -36,7 +59,7 @@ class _WidgetStudioScreenState extends State<WidgetStudioScreen> {
         ScaffoldMessenger.of(context)
           ..hideCurrentSnackBar()
           ..showSnackBar(const SnackBar(
-              content: Text('Keep at least one habit, or switch the checklist off.')));
+              content: Text('Keep at least one habit, or switch the habit checklist off.')));
         return;
       }
       current.remove(h.id);
@@ -47,21 +70,36 @@ class _WidgetStudioScreenState extends State<WidgetStudioScreen> {
         current.length == all.length ? <String>[] : current.toList());
   }
 
+  void _toggleStat(String key) {
+    final current = List<String>.from(extras.widgetStats);
+    if (current.contains(key)) {
+      current.remove(key);
+    } else {
+      if (current.length >= 4) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+              const SnackBar(content: Text('Up to four stats. Remove one first.')));
+        return;
+      }
+      current.add(key);
+    }
+    extras.setWidgetStats(current);
+  }
+
   Future<void> _addToHome() async {
     if (_busy) return;
     setState(() => _busy = true);
-    var shownHelp = false;
+    var needHelp = false;
     if (_canPin == true) {
       final ok = await HomeWidgetService.instance.requestPin();
-      if (!ok) shownHelp = true;
+      if (!ok) needHelp = true;
     } else {
-      shownHelp = true;
+      needHelp = true;
     }
     if (!mounted) return;
     setState(() => _busy = false);
-    if (shownHelp) {
-      _showHowTo();
-    }
+    if (needHelp) _showHowTo();
   }
 
   void _showHowTo() {
@@ -83,7 +121,7 @@ class _WidgetStudioScreenState extends State<WidgetStudioScreen> {
               'Press and hold an empty spot on your home screen.',
               'Tap "Widgets".',
               'Find "Prakriyā" and press and hold the widget.',
-              'Drag it where you want it, then drop it.',
+              'Drag it where you want it, then drop it. Make it taller to see more.',
             ])
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
@@ -121,12 +159,14 @@ class _WidgetStudioScreenState extends State<WidgetStudioScreen> {
             builder: (context, _) {
               final snap = HomeWidgetService.instance.snapshot();
               final habits = store.habits;
+              final habitsOn = extras.widgetBlockOn('habits');
+              final statsOn = extras.widgetBlockOn('stats');
               return Column(
                 children: [
                   const ScreenHeader(
                     icon: Icons.widgets_outlined,
                     title: 'Widget studio',
-                    subtitle: 'Design what you see on your home screen',
+                    subtitle: 'Your dashboard and to-do list on the home screen',
                   ),
                   Expanded(
                     child: ListView(
@@ -136,13 +176,19 @@ class _WidgetStudioScreenState extends State<WidgetStudioScreen> {
                         const SizedBox(height: 10),
                         Center(
                           child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 380),
-                            child: _WidgetPreview(snap: snap),
+                            constraints: const BoxConstraints(maxWidth: 400),
+                            child: _WidgetPreview(
+                              snap: snap,
+                              onAddTask: _addTask,
+                              onEditTask: _editTask,
+                              onToggleTask: (line) => store.toggleTask(line.index),
+                              onToggleHabit: (h) => store.toggleHabit(h),
+                            ),
                           ),
                         ),
                         const SizedBox(height: 8),
                         Text(
-                            'Tap a habit above to tick it. The widget on your home screen follows.',
+                            'Same as your home screen. Tick things off, tap a task to edit or delete it, or tap + to add one.',
                             textAlign: TextAlign.center,
                             style: body(11.5, Surfaces.muted(dark))),
                         const SizedBox(height: 18),
@@ -160,66 +206,82 @@ class _WidgetStudioScreenState extends State<WidgetStudioScreen> {
                                 style: body(11.5, Surfaces.muted(dark))),
                           ),
                         const SizedBox(height: 24),
-                        Text('LOOK', style: label(Surfaces.muted(dark))),
-                        const SizedBox(height: 10),
-                        Row(
-                          children: [
-                            for (final option in kWidgetStyles)
-                              Expanded(
-                                child: _StyleSwatch(
-                                  option: option,
-                                  selected: extras.widgetStyle == option.key,
-                                  onTap: () =>
-                                      extras.setWidgetLook(style: option.key),
-                                ),
-                              ),
-                          ],
-                        ),
-                        const SizedBox(height: 24),
-                        Text('WHAT IT SHOWS', style: label(Surfaces.muted(dark))),
+                        Text('WHAT SHOWS, AND IN WHAT ORDER',
+                            style: label(Surfaces.muted(dark))),
+                        const SizedBox(height: 6),
+                        Text('Switch blocks on or off. Press and drag the handle to reorder.',
+                            style: body(11.5, Surfaces.muted(dark))),
                         const SizedBox(height: 10),
                         ModuleCard(
-                          child: Column(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                          child: ReorderableListView(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            buildDefaultDragHandles: false,
+                            onReorder: (oldIndex, newIndex) {
+                              if (newIndex > oldIndex) newIndex -= 1;
+                              final list = List<String>.from(extras.widgetOrder);
+                              final item = list.removeAt(oldIndex);
+                              list.insert(newIndex, item);
+                              extras.setWidgetOrder(list);
+                            },
                             children: [
-                              _ToggleRow(
-                                label: "Today's habits checklist",
-                                value: store.widgetShowHabits,
-                                onChanged: (v) => store.setWidgetShowHabits(v),
-                              ),
-                              _ToggleRow(
-                                label: 'Progress bar',
-                                value: extras.widgetShowProgress,
-                                onChanged: (v) =>
-                                    extras.setWidgetLook(progress: v),
-                              ),
-                              _ToggleRow(
-                                label: 'Top to-do',
-                                value: store.widgetShowPriorities,
-                                onChanged: (v) =>
-                                    store.setWidgetShowPriorities(v),
-                              ),
-                              _ToggleRow(
-                                label: "Today's mantra",
-                                value: store.widgetShowMantra,
-                                onChanged: (v) => store.setWidgetShowMantra(v),
-                              ),
-                              _ToggleRow(
-                                label: 'Streak counter',
-                                value: extras.widgetShowStreak,
-                                onChanged: (v) =>
-                                    extras.setWidgetLook(streak: v),
-                              ),
+                              for (var i = 0; i < extras.widgetOrder.length; i++)
+                                _BlockRow(
+                                  key: ValueKey<String>(extras.widgetOrder[i]),
+                                  index: i,
+                                  blockKey: extras.widgetOrder[i],
+                                  on: extras.widgetBlockOn(extras.widgetOrder[i]),
+                                  onChanged: (v) =>
+                                      extras.setWidgetBlockOn(extras.widgetOrder[i], v),
+                                ),
                             ],
                           ),
                         ),
-                        if (store.widgetShowHabits && habits.isNotEmpty) ...[
+                        if (statsOn) ...[
+                          const SizedBox(height: 24),
+                          Text('DASHBOARD STATS', style: label(Surfaces.muted(dark))),
+                          const SizedBox(height: 6),
+                          Text('Pick up to four.',
+                              style: body(11.5, Surfaces.muted(dark))),
+                          const SizedBox(height: 10),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              for (final option in kWidgetStatOptions)
+                                _HabitChip(
+                                  name: option.$2,
+                                  selected: extras.widgetStats.contains(option.$1),
+                                  onTap: () => _toggleStat(option.$1),
+                                ),
+                            ],
+                          ),
+                        ],
+                        if (extras.widgetBlockOn('tasks')) ...[
+                          const SizedBox(height: 24),
+                          ModuleCard(
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text('Keep finished tasks in the list',
+                                      style: body(13.5, Surfaces.bodyText(dark),
+                                          weight: FontWeight.w500)),
+                                ),
+                                Switch(
+                                  value: extras.widgetShowDoneTasks,
+                                  activeTrackColor: Surfaces.accent(dark),
+                                  onChanged: extras.setWidgetShowDoneTasks,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                        if (habitsOn && habits.isNotEmpty) ...[
                           const SizedBox(height: 24),
                           Text('WHICH HABITS', style: label(Surfaces.muted(dark))),
                           const SizedBox(height: 6),
-                          Text(
-                              habits.length > 5
-                                  ? 'The widget lists up to 5 habits. Progress counts every habit you select.'
-                                  : 'Tap to include or leave out a habit.',
+                          Text('Tap to include or leave out a habit.',
                               style: body(11.5, Surfaces.muted(dark))),
                           const SizedBox(height: 10),
                           Wrap(
@@ -230,11 +292,26 @@ class _WidgetStudioScreenState extends State<WidgetStudioScreen> {
                                 _HabitChip(
                                   name: h.name,
                                   selected: store.widgetHabitSelected(h.id),
-                                  onTap: () => _toggleHabit(h),
+                                  onTap: () => _toggleHabitInWidget(h),
                                 ),
                             ],
                           ),
                         ],
+                        const SizedBox(height: 24),
+                        Text('LOOK', style: label(Surfaces.muted(dark))),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            for (final option in kWidgetStyles)
+                              Expanded(
+                                child: _StyleSwatch(
+                                  option: option,
+                                  selected: extras.widgetStyle == option.key,
+                                  onTap: () => extras.setWidgetStyle(option.key),
+                                ),
+                              ),
+                          ],
+                        ),
                         const SizedBox(height: 24),
                         ModuleCard(
                           child: Column(
@@ -245,7 +322,7 @@ class _WidgetStudioScreenState extends State<WidgetStudioScreen> {
                                       weight: FontWeight.w700)),
                               const SizedBox(height: 8),
                               Text(
-                                  'The widget refreshes whenever you change something in the app, and about every 30 minutes on its own. Tap it to open Prakriyā. You can resize it: a taller widget shows more.',
+                                  'On the widget, tap a circle to tick a task or habit. Tap a title to open your list. Tap + to add a task. Ticks are saved to the app the next time it opens. A taller widget shows more rows. It refreshes whenever you change something here, and about every 30 minutes on its own.',
                                   style: body(12.5, Surfaces.muted(dark))
                                       .copyWith(height: 1.45)),
                               const SizedBox(height: 10),
@@ -281,9 +358,136 @@ class _WidgetStudioScreenState extends State<WidgetStudioScreen> {
   }
 }
 
+class _TaskEdit {
+  final String text;
+  final bool delete;
+  const _TaskEdit(this.text, this.delete);
+}
+
+class _TaskDialog extends StatefulWidget {
+  final String? initial;
+  const _TaskDialog({this.initial});
+
+  @override
+  State<_TaskDialog> createState() => _TaskDialogState();
+}
+
+class _TaskDialogState extends State<_TaskDialog> {
+  late final TextEditingController _controller =
+      TextEditingController(text: widget.initial ?? '');
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    final text = _controller.text.trim();
+    if (text.isEmpty) return;
+    Navigator.of(context).pop(_TaskEdit(text, false));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final editing = widget.initial != null;
+    return AlertDialog(
+      title: Text(editing ? 'Edit task' : 'New task'),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        textCapitalization: TextCapitalization.sentences,
+        onSubmitted: (_) => _save(),
+        decoration: const InputDecoration(hintText: 'What needs doing today?'),
+      ),
+      actions: [
+        if (editing)
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(const _TaskEdit('', true)),
+            child: const Text('Delete'),
+          ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        TextButton(onPressed: _save, child: const Text('Save')),
+      ],
+    );
+  }
+}
+
+class _BlockRow extends StatelessWidget {
+  final int index;
+  final String blockKey;
+  final bool on;
+  final ValueChanged<bool> onChanged;
+  const _BlockRow({
+    super.key,
+    required this.index,
+    required this.blockKey,
+    required this.on,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    var title = blockKey;
+    var hint = '';
+    for (final b in kWidgetBlocks) {
+      if (b.$1 == blockKey) {
+        title = b.$2;
+        hint = b.$3;
+      }
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          ReorderableDragStartListener(
+            index: index,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 12, top: 6, bottom: 6),
+              child: Icon(Icons.drag_indicator, color: Surfaces.muted(dark)),
+            ),
+          ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title,
+                    style: body(13.5, Surfaces.bodyText(dark),
+                        weight: FontWeight.w600)),
+                Text(hint, style: body(11, Surfaces.muted(dark))),
+              ],
+            ),
+          ),
+          Switch(
+            value: on,
+            activeTrackColor: Surfaces.accent(dark),
+            onChanged: onChanged,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// An exact copy of what the home-screen widget draws, but live: ticks go
+/// straight to the store and tasks can be edited or added.
 class _WidgetPreview extends StatelessWidget {
   final WidgetSnapshot snap;
-  const _WidgetPreview({required this.snap});
+  final VoidCallback onAddTask;
+  final ValueChanged<WidgetTaskLine> onEditTask;
+  final ValueChanged<WidgetTaskLine> onToggleTask;
+  final ValueChanged<Habit> onToggleHabit;
+  const _WidgetPreview({
+    required this.snap,
+    required this.onAddTask,
+    required this.onEditTask,
+    required this.onToggleTask,
+    required this.onToggleHabit,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -291,8 +495,160 @@ class _WidgetPreview extends StatelessWidget {
     final text = Color(style.text);
     final muted = Color(style.muted);
     final accent = Color(style.accent);
-    final nothing =
-        snap.mantra.isEmpty && snap.priority.isEmpty && snap.habits.isEmpty;
+    final doneColor = Color(style.done);
+
+    Widget header(String title, String count) => Padding(
+          padding: const EdgeInsets.only(top: 12, bottom: 2),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(title,
+                    style: body(10.5, muted, weight: FontWeight.w800)),
+              ),
+              Text(count, style: body(10.5, muted)),
+            ],
+          ),
+        );
+
+    Widget note(String message) => Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Text(message, style: body(12, muted)),
+        );
+
+    Widget row({
+      required bool done,
+      required String name,
+      required VoidCallback onTick,
+      VoidCallback? onTap,
+    }) =>
+        Row(
+          children: [
+            InkWell(
+              borderRadius: BorderRadius.circular(16),
+              onTap: onTick,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(0, 6, 10, 6),
+                child: Icon(
+                    done ? Icons.check_circle_outline : Icons.radio_button_unchecked,
+                    size: 21,
+                    color: done ? doneColor : accent),
+              ),
+            ),
+            Expanded(
+              child: InkWell(
+                onTap: onTap,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Text(name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: body(13.5, done ? doneColor : text)),
+                ),
+              ),
+            ),
+          ],
+        );
+
+    final children = <Widget>[];
+    for (final block in snap.blocks) {
+      switch (block) {
+        case 'stats':
+          if (snap.stats.isNotEmpty) {
+            children.add(Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Row(
+                children: [
+                  for (final s in snap.stats)
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(s.value,
+                              style: body(19, text, weight: FontWeight.w800)),
+                          Text(s.label, style: body(10.5, muted)),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ));
+          }
+          break;
+        case 'progress':
+          if (snap.total > 0) {
+            children.add(Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                      snap.done >= snap.total
+                          ? 'Everything done today'
+                          : '${snap.done} of ${snap.total} done today',
+                      style: body(11.5, muted)),
+                  const SizedBox(height: 4),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: (snap.done / snap.total).clamp(0.0, 1.0).toDouble(),
+                      minHeight: 6,
+                      backgroundColor: muted.withValues(alpha: 0.28),
+                      valueColor: AlwaysStoppedAnimation<Color>(accent),
+                    ),
+                  ),
+                ],
+              ),
+            ));
+          }
+          break;
+        case 'tasks':
+          final shownTasks = snap.showDoneTasks
+              ? snap.tasks
+              : snap.tasks.where((t) => !t.task.done).toList();
+          children.add(header('TO-DO',
+              snap.tasks.isEmpty ? '' : '${snap.tasksDone}/${snap.tasks.length}'));
+          if (shownTasks.isEmpty) {
+            children.add(note(snap.tasks.isEmpty
+                ? 'No tasks yet. Tap + to add one.'
+                : 'All done. Nicely done.'));
+          }
+          for (final line in shownTasks) {
+            children.add(row(
+              done: line.task.done,
+              name: line.task.title,
+              onTick: () => onToggleTask(line),
+              onTap: () => onEditTask(line),
+            ));
+          }
+          break;
+        case 'habits':
+          children.add(header('HABITS',
+              snap.habits.isEmpty ? '' : '${snap.habitsDone}/${snap.habits.length}'));
+          if (snap.habits.isEmpty) {
+            children.add(note('No habits selected. Pick some below.'));
+          }
+          for (final line in snap.habits) {
+            children.add(row(
+              done: line.done,
+              name: line.habit.name,
+              onTick: () => onToggleHabit(line.habit),
+            ));
+          }
+          break;
+        case 'mantra':
+          if (snap.mantra.isNotEmpty) {
+            children.add(Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Text('“${snap.mantra}”',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: body(12.5, text).copyWith(fontStyle: FontStyle.italic)),
+            ));
+          }
+          break;
+      }
+    }
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -313,82 +669,32 @@ class _WidgetPreview extends StatelessWidget {
           Row(
             children: [
               Expanded(
-                child: Text('Prakriyā',
-                    style: body(15, Color(style.title), weight: FontWeight.w800)),
-              ),
-              if (snap.showStreak && snap.streak > 0)
-                Text('🔥 ${snap.streak}',
-                    style: body(12.5, accent, weight: FontWeight.w800)),
-            ],
-          ),
-          Text(snap.dateLabel, style: body(10.5, muted)),
-          if (snap.showProgress && snap.total > 0) ...[
-            const SizedBox(height: 10),
-            Text(
-                snap.done >= snap.total
-                    ? 'All ${snap.total} habits done today ✓'
-                    : '${snap.done} of ${snap.total} habits done',
-                style: body(11.5, muted)),
-            const SizedBox(height: 4),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: LinearProgressIndicator(
-                value: (snap.done / snap.total).clamp(0.0, 1.0).toDouble(),
-                minHeight: 6,
-                backgroundColor: muted.withValues(alpha: 0.28),
-                valueColor: AlwaysStoppedAnimation<Color>(accent),
-              ),
-            ),
-          ],
-          if (snap.priority.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            Text('▸ ${snap.priority}',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: body(12.5, text, weight: FontWeight.w700)),
-          ],
-          if (snap.habits.isNotEmpty) const SizedBox(height: 6),
-          for (final line in snap.habits)
-            InkWell(
-              borderRadius: BorderRadius.circular(6),
-              onTap: () => store.toggleHabit(line.habit),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(
-                        line.done
-                            ? Icons.check_circle
-                            : Icons.radio_button_unchecked,
-                        size: 16,
-                        color: line.done ? Color(style.done) : accent),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(line.habit.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: body(12.5, line.done ? Color(style.done) : text)
-                              .copyWith(
-                                  decoration: line.done
-                                      ? TextDecoration.lineThrough
-                                      : TextDecoration.none)),
-                    ),
+                    Text('Prakriyā',
+                        style: body(15, Color(style.title), weight: FontWeight.w800)),
+                    Text(snap.dateLabel, style: body(10.5, muted)),
                   ],
                 ),
               ),
+              InkWell(
+                borderRadius: BorderRadius.circular(20),
+                onTap: onAddTask,
+                child: Padding(
+                  padding: const EdgeInsets.all(6),
+                  child: Icon(Icons.add, color: accent, size: 26),
+                ),
+              ),
+            ],
+          ),
+          ...children,
+          if (children.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Text('Switch a block on below to fill your widget.',
+                  style: body(12, muted)),
             ),
-          if (snap.mantra.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Text('“${snap.mantra}”',
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: body(12, text).copyWith(fontStyle: FontStyle.italic)),
-          ],
-          if (nothing) ...[
-            const SizedBox(height: 10),
-            Text('Open Prakriyā to set up your day.',
-                style: body(11.5, muted)),
-          ],
         ],
       ),
     );
@@ -447,32 +753,6 @@ class _StyleSwatch extends StatelessWidget {
           ],
         ),
       ),
-    );
-  }
-}
-
-class _ToggleRow extends StatelessWidget {
-  final String label;
-  final bool value;
-  final ValueChanged<bool> onChanged;
-  const _ToggleRow(
-      {required this.label, required this.value, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    final dark = Theme.of(context).brightness == Brightness.dark;
-    return Row(
-      children: [
-        Expanded(
-          child: Text(label,
-              style: body(13.5, Surfaces.bodyText(dark), weight: FontWeight.w500)),
-        ),
-        Switch(
-          value: value,
-          activeTrackColor: Surfaces.accent(dark),
-          onChanged: onChanged,
-        ),
-      ],
     );
   }
 }

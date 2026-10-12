@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HapticFeedback;
 
 import '../models.dart';
+import '../services/home_widget_service.dart';
 import '../store.dart';
 import '../theme.dart';
 import '../widgets/boosters.dart';
@@ -96,6 +97,29 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) => _maybeShowDailyPrompts());
+    // A tap on the home-screen widget asks us to open a screen. The request
+    // is held in HomeWidgetService until this screen exists, so a PIN lock
+    // is never bypassed.
+    HomeWidgetService.instance.pendingOpen.addListener(_openFromWidget);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _openFromWidget());
+  }
+
+  @override
+  void dispose() {
+    HomeWidgetService.instance.pendingOpen.removeListener(_openFromWidget);
+    super.dispose();
+  }
+
+  void _openFromWidget() {
+    if (!mounted) return;
+    final target = HomeWidgetService.instance.pendingOpen.value;
+    if (target == null) return;
+    HomeWidgetService.instance.pendingOpen.value = null;
+    if (target == 'tasks' || target == 'addtask') {
+      _openTodos();
+    } else {
+      setState(() => _tabIndex = 0);
+    }
   }
 
   Future<void> _maybeShowDailyPrompts() async {

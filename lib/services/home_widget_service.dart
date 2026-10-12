@@ -95,38 +95,82 @@ class WidgetHabitLine {
   const WidgetHabitLine(this.habit, this.done);
 }
 
-/// Everything the widget shows right now, computed once so the in-app preview
-/// and the native widget can never disagree.
+/// One of today's tasks, with its position in the store's list (needed to
+/// tick, edit or delete it).
+class WidgetTaskLine {
+  final int index;
+  final Task task;
+  const WidgetTaskLine(this.index, this.task);
+}
+
+class WidgetStat {
+  final String key;
+  final String label;
+  final String value;
+  const WidgetStat(this.key, this.label, this.value);
+}
+
+/// Blocks the widget can show, in their default order.
+const List<(String key, String label, String hint)> kWidgetBlocks = [
+  ('stats', 'Dashboard stats', 'Up to four numbers at a glance'),
+  ('progress', 'Progress bar', "How much of today is done"),
+  ('tasks', 'To-do list', 'Today\'s tasks, tick them right on the widget'),
+  ('habits', 'Habit checklist', 'Tick habits right on the widget'),
+  ('mantra', 'Daily mantra', "Today's line to carry"),
+];
+
+/// Stats the dashboard block can show.
+const List<(String key, String label)> kWidgetStatOptions = [
+  ('habits', 'Habits'),
+  ('tasks', 'Tasks'),
+  ('streak', 'Day streak'),
+  ('focus', 'Focus'),
+  ('meditate', 'Meditated'),
+  ('water', 'Water'),
+];
+
+/// Everything the widget shows right now, computed once so the in-app
+/// preview and the native widget never disagree.
 class WidgetSnapshot {
   final String style;
   final String dateLabel;
   final String mantra;
-  final String priority;
-  final List<WidgetHabitLine> habits;
-  final int done;
-  final int total;
   final int streak;
-  final bool showProgress;
-  final bool showStreak;
+  final List<String> blocks;
+  final List<WidgetStat> stats;
+  final List<WidgetHabitLine> habits;
+  final List<WidgetTaskLine> tasks;
+  final bool showDoneTasks;
   const WidgetSnapshot({
     required this.style,
     required this.dateLabel,
     required this.mantra,
-    required this.priority,
-    required this.habits,
-    required this.done,
-    required this.total,
     required this.streak,
-    required this.showProgress,
-    required this.showStreak,
+    required this.blocks,
+    required this.stats,
+    required this.habits,
+    required this.tasks,
+    required this.showDoneTasks,
   });
+
+  int get habitsDone => habits.where((h) => h.done).length;
+  int get tasksDone => tasks.where((t) => t.task.done).length;
+  int get total => habits.length + tasks.length;
+  int get done => habitsDone + tasksDone;
 }
 
-/// Keeps the Android home-screen widget's data in sync with the app.
+/// Keeps the Android home-screen widget in sync with the app, in both
+/// directions.
 ///
-/// The native provider and layouts live in `android_overrides/widget/` and are
-/// copied into the generated Android project by CI. Everything is passed to it
-/// as text through shared preferences.
+/// App to widget: the look, the blocks to show and today's lists are written
+/// as text into shared preferences and the widget is told to redraw.
+/// Widget to app: ticking a task or habit on the widget redraws it at once
+/// and queues the change under `widget_pending`; [syncFromWidget] applies
+/// that queue to the store the next time the app runs. Taps on titles open
+/// the app, which reports them through [pendingOpen].
+///
+/// The native provider and layouts live in `android_overrides/widget/` and
+/// are copied into the generated Android project by CI.
 class HomeWidgetService {
   HomeWidgetService._();
   static final instance = HomeWidgetService._();
@@ -134,8 +178,14 @@ class HomeWidgetService {
   static const _androidWidgetName = 'HabitsWidgetProvider';
   static const _qualifiedName = 'ai.aandccreative.prakriya.HabitsWidgetProvider';
 
+  /// A screen the widget asked to open ('tasks', 'addtask', 'dashboard').
+  /// The home screen consumes it, so a PIN lock is never bypassed.
+  final ValueNotifier<String?> pendingOpen = ValueNotifier<String?>(null);
+
   bool _wired = false;
   Timer? _debounce;
+  bool _pushing = false;
+  bool _again = false;
 
   /// Starts listening and pushing widget data on every change. Safe to call
   /// more than once.
@@ -144,7 +194,23 @@ class HomeWidgetService {
     _wired = true;
     store.addListener(_schedule);
     extras.addListener(_schedule);
+    try {
+      HomeWidget.widgetClicked.listen(_handleUri, onError: (Object _) {});
+      HomeWidget.initiallyLaunchedFromHomeWidget()
+          .then(_handleUri)
+          .catchError((Object _) {});
+    } catch (_) {
+      // No widget plugin on this platform.
+    }
     _schedule();
+  }
+
+  void _handleUri(Uri? uri) {
+    if (uri == null || uri.scheme != 'prakriya' || uri.host != 'widget') return;
+    final segments = uri.pathSegments;
+    if (segments.length >= 2 && segments.first == 'open') {
+      pendingOpen.value = segments[1];
+    }
   }
 
   void _schedule() {
@@ -157,41 +223,71 @@ class HomeWidgetService {
   /// Manual "update now".
   Future<void> forceRefresh() => _push();
 
+  // ---- Snapshot ----
+
   /// What the widget shows right now.
   WidgetSnapshot snapshot() {
     final today = DateTime.now();
+
     final habitLines = <WidgetHabitLine>[];
-    var done = 0;
-    var total = 0;
-    if (store.widgetShowHabits) {
-      final selected =
-          store.habits.where((h) => store.widgetHabitSelected(h.id)).toList();
-      total = selected.length;
-      for (final h in selected) {
-        final isDone = h.isDoneOn(today);
-        if (isDone) done++;
-      }
-      for (final h in selected.take(5)) {
+    for (final h in store.habits) {
+      if (store.widgetHabitSelected(h.id)) {
         habitLines.add(WidgetHabitLine(h, h.isDoneOn(today)));
       }
     }
-    var priority = '';
-    if (store.widgetShowPriorities) {
-      final open = store.todaysTasks.where((t) => !t.done).toList();
-      if (open.isNotEmpty) priority = open.first.title;
+
+    // Open tasks first, finished ones after; each keeps its store position.
+    final all = store.todaysTasks;
+    final open = <WidgetTaskLine>[];
+    final finished = <WidgetTaskLine>[];
+    for (var i = 0; i < all.length; i++) {
+      (all[i].done ? finished : open).add(WidgetTaskLine(i, all[i]));
     }
-    final mantra = store.widgetShowMantra ? store.mantraOfTheDay : '';
+    final taskLines = <WidgetTaskLine>[...open, ...finished];
+
+    final streak = _overallStreak();
+    final stats = <WidgetStat>[];
+    for (final key in extras.widgetStats) {
+      switch (key) {
+        case 'habits':
+          final habitsDone = habitLines.where((h) => h.done).length;
+          stats.add(WidgetStat('habits', 'Habits',
+              habitLines.isEmpty ? '–' : '$habitsDone/${habitLines.length}'));
+          break;
+        case 'tasks':
+          final tasksDone = taskLines.where((t) => t.task.done).length;
+          stats.add(WidgetStat('tasks', 'Tasks',
+              taskLines.isEmpty ? '–' : '$tasksDone/${taskLines.length}'));
+          break;
+        case 'streak':
+          stats.add(WidgetStat('streak', 'Day streak', '$streak'));
+          break;
+        case 'focus':
+          stats.add(WidgetStat('focus', 'Focus', '${extras.focusMinutesOn(today)}m'));
+          break;
+        case 'meditate':
+          stats.add(WidgetStat(
+              'meditate', 'Meditated', '${extras.meditationMinutesOn(today)}m'));
+          break;
+        case 'water':
+          stats.add(WidgetStat('water', 'Water', '${extras.waterOn(today)}'));
+          break;
+      }
+    }
+
     return WidgetSnapshot(
       style: extras.widgetStyle,
       dateLabel: _dateLabel(today),
-      mantra: mantra,
-      priority: priority,
+      mantra: store.mantraOfTheDay,
+      streak: streak,
+      blocks: <String>[
+        for (final k in extras.widgetOrder)
+          if (extras.widgetBlockOn(k)) k,
+      ],
+      stats: stats,
       habits: habitLines,
-      done: done,
-      total: total,
-      streak: _overallStreak(),
-      showProgress: extras.widgetShowProgress,
-      showStreak: extras.widgetShowStreak,
+      tasks: taskLines,
+      showDoneTasks: extras.widgetShowDoneTasks,
     );
   }
 
@@ -221,6 +317,8 @@ class HomeWidgetService {
     return count;
   }
 
+  // ---- Pinning ----
+
   /// Whether this phone's launcher can show the "add widget" prompt.
   Future<bool> canPin() async {
     try {
@@ -242,25 +340,121 @@ class HomeWidgetService {
     }
   }
 
-  Future<void> _push() async {
+  // ---- Widget to app ----
+
+  /// Applies ticks made on the home-screen widget to the store. Safe to call
+  /// at any time; does nothing when nothing is queued.
+  Future<void> syncFromWidget() async {
     try {
+      final raw = await HomeWidget.getWidgetData<String>('widget_pending',
+          defaultValue: '[]');
+      if (raw == null || raw.isEmpty || raw == '[]') return;
+      await HomeWidget.saveWidgetData<String>('widget_pending', '[]');
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return;
+      final todayKey = dayKey(DateTime.now());
+      final now = DateTime.now();
+      for (final entry in decoded) {
+        if (entry is! Map) continue;
+        final day = entry['day'];
+        if (day is String && day.isNotEmpty && day != todayKey) continue;
+        final kind = entry['k'];
+        final key = entry['key'];
+        final want = entry['v'] == true;
+        if (key is! String) continue;
+        if (kind == 'habit') {
+          for (final h in store.habits) {
+            if (h.id == key) {
+              if (h.isDoneOn(now) != want) await store.toggleHabit(h);
+              break;
+            }
+          }
+        } else if (kind == 'task') {
+          final tasks = store.todaysTasks;
+          final hint = entry['i'];
+          var index = -1;
+          if (hint is int &&
+              hint >= 0 &&
+              hint < tasks.length &&
+              tasks[hint].title == key) {
+            index = hint;
+          } else {
+            for (var i = 0; i < tasks.length; i++) {
+              if (tasks[i].title == key && tasks[i].done != want) {
+                index = i;
+                break;
+              }
+            }
+          }
+          if (index >= 0 && tasks[index].done != want) {
+            await store.toggleTask(index);
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('syncFromWidget failed: $e');
+    }
+  }
+
+  // ---- App to widget ----
+
+  Future<void> _push() async {
+    if (_pushing) {
+      _again = true;
+      return;
+    }
+    _pushing = true;
+    try {
+      do {
+        _again = false;
+        await _pushOnce();
+      } while (_again);
+    } finally {
+      _pushing = false;
+    }
+  }
+
+  Future<void> _pushOnce() async {
+    try {
+      // Ticks made on the widget come first, so the data we write back
+      // already includes them.
+      await syncFromWidget();
+
+      // One-time: carry the older per-section switches into the block list.
+      if (!extras.widgetBlocksSeeded) {
+        extras.seedWidgetBlocks(off: <String>[
+          if (!store.widgetShowHabits) 'habits',
+          if (!store.widgetShowPriorities) 'tasks',
+          if (!store.widgetShowMantra) 'mantra',
+        ]);
+      }
+
       final snap = snapshot();
-      final habitsJson = jsonEncode([
-        for (final line in snap.habits)
-          {'name': line.habit.name, 'done': line.done},
+      final tasksJson = jsonEncode([
+        for (final t in snap.tasks)
+          {'i': t.index, 't': t.task.title, 'd': t.task.done},
       ]);
-      await HomeWidget.saveWidgetData<String>('widget_habits', habitsJson);
-      await HomeWidget.saveWidgetData<String>('widget_top_priority', snap.priority);
-      await HomeWidget.saveWidgetData<String>('widget_mantra', snap.mantra);
-      await HomeWidget.saveWidgetData<String>('widget_style', snap.style);
-      await HomeWidget.saveWidgetData<String>('widget_date', snap.dateLabel);
-      await HomeWidget.saveWidgetData<String>('widget_done', '${snap.done}');
-      await HomeWidget.saveWidgetData<String>('widget_total', '${snap.total}');
-      await HomeWidget.saveWidgetData<String>('widget_streak', '${snap.streak}');
-      await HomeWidget.saveWidgetData<String>(
-          'widget_show_progress', snap.showProgress ? '1' : '0');
-      await HomeWidget.saveWidgetData<String>(
-          'widget_show_streak', snap.showStreak ? '1' : '0');
+      final habitsJson = jsonEncode([
+        for (final h in snap.habits)
+          {'id': h.habit.id, 'n': h.habit.name, 'd': h.done},
+      ]);
+      final statsJson = jsonEncode([
+        for (final s in snap.stats) {'k': s.key, 'l': s.label, 'v': s.value},
+      ]);
+
+      Future<void> put(String key, String value) async {
+        await HomeWidget.saveWidgetData<String>(key, value);
+      }
+
+      await put('widget_style', snap.style);
+      await put('widget_date', snap.dateLabel);
+      await put('widget_day', dayKey(DateTime.now()));
+      await put('widget_blocks', jsonEncode(snap.blocks));
+      await put('widget_stats', statsJson);
+      await put('widget_tasks', tasksJson);
+      await put('widget_habits', habitsJson);
+      await put('widget_mantra', snap.mantra);
+      await put('widget_show_done_tasks', snap.showDoneTasks ? '1' : '0');
       await HomeWidget.updateWidget(androidName: _androidWidgetName);
     } catch (_) {
       // No widget added yet, or a platform without the native provider.

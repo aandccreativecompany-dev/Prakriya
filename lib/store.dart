@@ -208,6 +208,16 @@ class Store extends ChangeNotifier {
     await _commit();
   }
 
+  /// Changes a task's title (for today's list).
+  Future<void> renameTask(int index, String title) async {
+    final trimmed = title.trim();
+    if (trimmed.isEmpty) return;
+    final list = _state.tasksByDay[dayKey(DateTime.now())];
+    if (list == null || index < 0 || index >= list.length) return;
+    list[index].title = trimmed;
+    await _commit();
+  }
+
   Future<void> removeTask(int index) async {
     final list = _state.tasksByDay[dayKey(DateTime.now())];
     if (list == null || index < 0 || index >= list.length) return;

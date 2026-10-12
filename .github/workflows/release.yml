@@ -47,7 +47,7 @@ jobs:
           cp android_overrides/widget/HabitsWidgetProvider.kt android/app/src/main/kotlin/ai/aandccreative/prakriya/HabitsWidgetProvider.kt
           mkdir -p android/app/src/main/res/xml android/app/src/main/res/layout
           cp android_overrides/widget/habits_widget_info.xml android/app/src/main/res/xml/habits_widget_info.xml
-          cp android_overrides/widget/habits_widget.xml android/app/src/main/res/layout/habits_widget.xml
+          cp android_overrides/widget/layout/*.xml android/app/src/main/res/layout/
           mkdir -p android/app/src/main/res/drawable android/app/src/main/res/drawable-nodpi android/app/src/main/res/values
           cp android_overrides/widget/drawable/*.xml android/app/src/main/res/drawable/
           cp android_overrides/widget/drawable-nodpi/widget_preview.png android/app/src/main/res/drawable-nodpi/widget_preview.png

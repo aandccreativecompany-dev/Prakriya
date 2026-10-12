@@ -269,6 +269,11 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
         state == AppLifecycleState.detached) {
       unawaited(store.flush());
     }
+    // Ticks made on the home-screen widget while the app was away are queued
+    // natively; apply them as soon as the app is back in front.
+    if (state == AppLifecycleState.resumed) {
+      unawaited(HomeWidgetService.instance.syncFromWidget());
+    }
     if (!store.hasPin || !store.onboardingComplete) return;
     if (state == AppLifecycleState.paused) {
       _pausedAt ??= DateTime.now();

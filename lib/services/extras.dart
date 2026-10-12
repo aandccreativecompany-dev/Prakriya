@@ -48,10 +48,23 @@ class Extras extends ChangeNotifier {
   int meditationInterval = 0;
   String breathPattern = 'calm';
 
-  /// Home-screen widget look and extras: style key, progress bar, streak.
+  /// Home-screen widget: look, the order of its blocks, which blocks are
+  /// switched off, which dashboard stats it shows, and whether ticked tasks
+  /// stay in the list.
   String widgetStyle = 'dusk';
-  bool widgetShowProgress = true;
-  bool widgetShowStreak = true;
+  List<String> widgetOrder = <String>[
+    'stats',
+    'progress',
+    'tasks',
+    'habits',
+    'mantra',
+  ];
+  List<String> widgetOff = <String>[];
+  List<String> widgetStats = <String>['habits', 'tasks', 'streak'];
+  bool widgetShowDoneTasks = true;
+
+  /// False until the old per-section switches were copied across once.
+  bool widgetBlocksSeeded = false;
 
   bool checklistDismissed = false;
 
@@ -117,12 +130,16 @@ class Extras extends ChangeNotifier {
           if (decoded['widgetStyle'] is String) {
             widgetStyle = decoded['widgetStyle'] as String;
           }
-          if (decoded['widgetShowProgress'] is bool) {
-            widgetShowProgress = decoded['widgetShowProgress'] as bool;
+          final order = _readStringList(decoded['widgetOrder']);
+          if (order != null) widgetOrder = _completeOrder(order);
+          final off = _readStringList(decoded['widgetOff']);
+          if (off != null) widgetOff = off;
+          final stats = _readStringList(decoded['widgetStats']);
+          if (stats != null) widgetStats = stats.take(4).toList();
+          if (decoded['widgetShowDoneTasks'] is bool) {
+            widgetShowDoneTasks = decoded['widgetShowDoneTasks'] as bool;
           }
-          if (decoded['widgetShowStreak'] is bool) {
-            widgetShowStreak = decoded['widgetShowStreak'] as bool;
-          }
+          widgetBlocksSeeded = decoded['widgetBlocksSeeded'] == true;
           checklistDismissed = decoded['checklistDismissed'] == true;
           recapDismissedWeek = decoded['recapDismissedWeek'] is String
               ? decoded['recapDismissedWeek'] as String
@@ -136,6 +153,22 @@ class Extras extends ChangeNotifier {
       debugPrint('Extras.load failed: $e');
     }
     notifyListeners();
+  }
+
+  static List<String>? _readStringList(dynamic source) {
+    if (source is! List) return null;
+    return <String>[for (final e in source) '$e'];
+  }
+
+  /// A saved order that predates a block (or lost one) still lists every
+  /// block exactly once.
+  static List<String> _completeOrder(List<String> saved) {
+    const all = ['stats', 'progress', 'tasks', 'habits', 'mantra'];
+    final out = <String>[for (final k in saved) if (all.contains(k)) k];
+    for (final k in all) {
+      if (!out.contains(k)) out.add(k);
+    }
+    return out.toSet().toList();
   }
 
   static void _readIntMap(dynamic source, Map<String, int> into) {
@@ -182,8 +215,11 @@ class Extras extends ChangeNotifier {
           'meditationInterval': meditationInterval,
           'breathPattern': breathPattern,
           'widgetStyle': widgetStyle,
-          'widgetShowProgress': widgetShowProgress,
-          'widgetShowStreak': widgetShowStreak,
+          'widgetOrder': widgetOrder,
+          'widgetOff': widgetOff,
+          'widgetStats': widgetStats,
+          'widgetShowDoneTasks': widgetShowDoneTasks,
+          'widgetBlocksSeeded': widgetBlocksSeeded,
           'checklistDismissed': checklistDismissed,
           'recapDismissedWeek': recapDismissedWeek,
           'carriedOverOn': carriedOverOn,
@@ -264,10 +300,42 @@ class Extras extends ChangeNotifier {
 
   // ---- Home screen widget ----
 
-  void setWidgetLook({String? style, bool? progress, bool? streak}) {
-    if (style != null) widgetStyle = style;
-    if (progress != null) widgetShowProgress = progress;
-    if (streak != null) widgetShowStreak = streak;
+  bool widgetBlockOn(String key) => !widgetOff.contains(key);
+
+  void setWidgetStyle(String style) {
+    widgetStyle = style;
+    _changed();
+  }
+
+  void setWidgetBlockOn(String key, bool on) {
+    widgetOff.remove(key);
+    if (!on) widgetOff.add(key);
+    widgetBlocksSeeded = true;
+    _changed();
+  }
+
+  void setWidgetOrder(List<String> order) {
+    widgetOrder = _completeOrder(order);
+    widgetBlocksSeeded = true;
+    _changed();
+  }
+
+  /// Which dashboard stats show (at most four, in the order given).
+  void setWidgetStats(List<String> stats) {
+    widgetStats = stats.take(4).toList();
+    _changed();
+  }
+
+  void setWidgetShowDoneTasks(bool value) {
+    widgetShowDoneTasks = value;
+    _changed();
+  }
+
+  /// One-time copy of the older per-section switches into the block list.
+  void seedWidgetBlocks({required List<String> off}) {
+    if (widgetBlocksSeeded) return;
+    widgetOff = List<String>.from(off);
+    widgetBlocksSeeded = true;
     _changed();
   }
 

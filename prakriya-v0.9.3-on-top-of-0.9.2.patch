@@ -1,0 +1,3691 @@
+diff --git a/.github/workflows/release.yml b/.github/workflows/release.yml
+index 3f235f0..e098be2 100644
+--- a/.github/workflows/release.yml
++++ b/.github/workflows/release.yml
+@@ -47,7 +47,7 @@ jobs:
+           cp android_overrides/widget/HabitsWidgetProvider.kt android/app/src/main/kotlin/ai/aandccreative/prakriya/HabitsWidgetProvider.kt
+           mkdir -p android/app/src/main/res/xml android/app/src/main/res/layout
+           cp android_overrides/widget/habits_widget_info.xml android/app/src/main/res/xml/habits_widget_info.xml
+-          cp android_overrides/widget/habits_widget.xml android/app/src/main/res/layout/habits_widget.xml
++          cp android_overrides/widget/layout/*.xml android/app/src/main/res/layout/
+           mkdir -p android/app/src/main/res/drawable android/app/src/main/res/drawable-nodpi android/app/src/main/res/values
+           cp android_overrides/widget/drawable/*.xml android/app/src/main/res/drawable/
+           cp android_overrides/widget/drawable-nodpi/widget_preview.png android/app/src/main/res/drawable-nodpi/widget_preview.png
+diff --git a/android_overrides/widget/HabitsWidgetProvider.kt b/android_overrides/widget/HabitsWidgetProvider.kt
+index 7aeaece..06d473f 100644
+--- a/android_overrides/widget/HabitsWidgetProvider.kt
++++ b/android_overrides/widget/HabitsWidgetProvider.kt
+@@ -2,24 +2,39 @@ package ai.aandccreative.prakriya
+ 
+ import android.app.PendingIntent
+ import android.appwidget.AppWidgetManager
++import android.content.ComponentName
+ import android.content.Context
++import android.content.Intent
+ import android.content.SharedPreferences
+ import android.graphics.Color
++import android.net.Uri
+ import android.os.Bundle
+ import android.view.View
+ import android.widget.RemoteViews
+ import es.antonborri.home_widget.HomeWidgetPlugin
+ import es.antonborri.home_widget.HomeWidgetProvider
++import java.util.Calendar
+ import org.json.JSONArray
++import org.json.JSONObject
+ 
+ /**
+- * Prakriyā home-screen widget. All content and the chosen look ("style") are
+- * written by the Flutter side (HomeWidgetService) into shared preferences;
+- * this class only turns them into RemoteViews. It adapts to the widget's
+- * current height so a short widget shows less instead of clipping.
++ * Prakriyā home-screen widget: a small dashboard plus the to-do list and
++ * habit checklist. The Flutter side writes everything as text into shared
++ * preferences (look, which blocks to show and in what order, the lists);
++ * this class turns that into RemoteViews.
++ *
++ * Ticking a task or habit works right on the widget: the new state is saved
++ * to the same preferences and redrawn at once, and the change is queued in
++ * "widget_pending" for the app to apply the next time it opens. Tapping a
++ * title opens the app on the matching screen.
+  */
+ class HabitsWidgetProvider : HomeWidgetProvider() {
+ 
++    companion object {
++        const val ACTION_TOGGLE = "ai.aandccreative.prakriya.WIDGET_TOGGLE"
++        const val ACTION_LAUNCH = "es.antonborri.home_widget.action.LAUNCH"
++    }
++
+     private class Palette(
+         val key: String,
+         val background: Int,
+@@ -74,6 +89,123 @@ class HabitsWidgetProvider : HomeWidgetProvider() {
+             appWidgetId, build(context, appWidgetManager, appWidgetId, data))
+     }
+ 
++    override fun onReceive(context: Context, intent: Intent) {
++        if (intent.action == ACTION_TOGGLE) {
++            handleToggle(context, intent)
++            return
++        }
++        super.onReceive(context, intent)
++    }
++
++    // ---- Toggling from the widget ----
++
++    private fun handleToggle(context: Context, intent: Intent) {
++        val kind = intent.getStringExtra("kind") ?: return
++        val key = intent.getStringExtra("key") ?: return
++        val index = intent.getIntExtra("index", -1)
++        val prefs = HomeWidgetPlugin.getData(context)
++        val listKey = if (kind == "task") "widget_tasks" else "widget_habits"
++        try {
++            val arr = JSONArray(prefs.getString(listKey, "[]") ?: "[]")
++            var found = false
++            var newValue = false
++            for (i in 0 until arr.length()) {
++                val o = arr.getJSONObject(i)
++                val match = if (kind == "task") {
++                    o.optInt("i", -2) == index && o.optString("t") == key
++                } else {
++                    o.optString("id") == key
++                }
++                if (match) {
++                    newValue = !o.optBoolean("d", false)
++                    o.put("d", newValue)
++                    found = true
++                    break
++                }
++            }
++            if (!found) return
++
++            // Queue the change for the app; a later tap on the same item
++            // replaces the earlier one.
++            val pending = JSONArray(prefs.getString("widget_pending", "[]") ?: "[]")
++            val kept = JSONArray()
++            for (i in 0 until pending.length()) {
++                val p = pending.getJSONObject(i)
++                val same = p.optString("k") == kind &&
++                    p.optString("key") == key &&
++                    p.optInt("i", -2) == index
++                if (!same) kept.put(p)
++            }
++            val entry = JSONObject()
++            entry.put("k", kind)
++            entry.put("key", key)
++            entry.put("i", index)
++            entry.put("v", newValue)
++            entry.put("day", prefs.getString("widget_day", "") ?: "")
++            kept.put(entry)
++
++            prefs.edit()
++                .putString(listKey, arr.toString())
++                .putString("widget_pending", kept.toString())
++                .apply()
++        } catch (e: Exception) {
++            return
++        }
++        refreshAll(context)
++    }
++
++    private fun refreshAll(context: Context) {
++        val manager = AppWidgetManager.getInstance(context)
++        val ids = manager.getAppWidgetIds(ComponentName(context, HabitsWidgetProvider::class.java))
++        val data = HomeWidgetPlugin.getData(context)
++        for (id in ids) {
++            manager.updateAppWidget(id, build(context, manager, id, data))
++        }
++    }
++
++    // ---- Pending intents ----
++
++    private fun openIntent(context: Context, target: String): PendingIntent? {
++        val component = context.packageManager
++            .getLaunchIntentForPackage(context.packageName)?.component ?: return null
++        val intent = Intent()
++        intent.component = component
++        intent.action = ACTION_LAUNCH
++        intent.data = Uri.parse("prakriya://widget/open/$target")
++        return PendingIntent.getActivity(
++            context, 0, intent,
++            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
++    }
++
++    private fun toggleIntent(context: Context, kind: String, key: String, index: Int): PendingIntent {
++        val intent = Intent(context, HabitsWidgetProvider::class.java)
++        intent.action = ACTION_TOGGLE
++        intent.data = Uri.parse("prakriya://widget/toggle/$kind/$index/" + Uri.encode(key))
++        intent.putExtra("kind", kind)
++        intent.putExtra("key", key)
++        intent.putExtra("index", index)
++        return PendingIntent.getBroadcast(
++            context, 0, intent,
++            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
++    }
++
++    // ---- Drawing ----
++
++    private fun todayKey(): String {
++        val c = Calendar.getInstance()
++        return String.format(
++            "%04d-%02d-%02d", c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1,
++            c.get(Calendar.DAY_OF_MONTH))
++    }
++
++    private fun readArray(data: SharedPreferences, key: String): JSONArray {
++        return try {
++            JSONArray(data.getString(key, "[]") ?: "[]")
++        } catch (e: Exception) {
++            JSONArray()
++        }
++    }
++
+     private fun build(
+         context: Context,
+         manager: AppWidgetManager,
+@@ -81,131 +213,205 @@ class HabitsWidgetProvider : HomeWidgetProvider() {
+         data: SharedPreferences
+     ): RemoteViews {
+         val p = palette(data.getString("widget_style", "dusk"))
+-        val views = RemoteViews(context.packageName, R.layout.habits_widget)
++        val pkg = context.packageName
++        val views = RemoteViews(pkg, R.layout.habits_widget)
++        views.setInt(R.id.widget_root, "setBackgroundResource", p.background)
+ 
+-        // Height budget (dp): decides how much fits.
+         val options = manager.getAppWidgetOptions(id)
+-        var height = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 110)
+-        if (height <= 0) height = 110
+-
+-        val mantra = data.getString("widget_mantra", "") ?: ""
+-        val priority = data.getString("widget_top_priority", "") ?: ""
+-        // Everything is stored as text by the Flutter side, so reads never
+-        // depend on how the platform channel boxed a number.
+-        val showProgress = (data.getString("widget_show_progress", "1") ?: "1") == "1"
+-        val showStreak = (data.getString("widget_show_streak", "1") ?: "1") == "1"
+-        val streak = (data.getString("widget_streak", "0") ?: "0").toIntOrNull() ?: 0
+-        val done = (data.getString("widget_done", "0") ?: "0").toIntOrNull() ?: 0
+-        val total = (data.getString("widget_total", "0") ?: "0").toIntOrNull() ?: 0
+-        val dateLabel = data.getString("widget_date", "") ?: ""
+-        val habits = parseHabits(data.getString("widget_habits", "[]"))
+-
+-        views.setInt(R.id.widget_root, "setBackgroundResource", p.background)
++        var height = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 180)
++        if (height <= 0) height = 180
++        var budget = height - 24 - 40 - 6
+ 
+         // Header
+         views.setTextViewText(R.id.widget_title, "Prakriyā")
+         views.setTextColor(R.id.widget_title, p.title)
+-        if (showStreak && streak > 0) {
+-            views.setTextViewText(R.id.widget_streak, "🔥 $streak")
+-            views.setTextColor(R.id.widget_streak, p.accent)
+-            views.setViewVisibility(R.id.widget_streak, View.VISIBLE)
+-        } else {
+-            views.setViewVisibility(R.id.widget_streak, View.GONE)
+-        }
++        val dateLabel = data.getString("widget_date", "") ?: ""
+         views.setTextViewText(R.id.widget_date, dateLabel)
+         views.setTextColor(R.id.widget_date, p.muted)
+         views.setViewVisibility(R.id.widget_date, if (dateLabel.isEmpty()) View.GONE else View.VISIBLE)
++        views.setTextColor(R.id.widget_add, p.accent)
++        val openDash = openIntent(context, "dashboard")
++        val openAdd = openIntent(context, "addtask")
++        if (openDash != null) {
++            views.setOnClickPendingIntent(R.id.widget_root, openDash)
++            views.setOnClickPendingIntent(R.id.widget_head, openDash)
++        }
++        if (openAdd != null) views.setOnClickPendingIntent(R.id.widget_add, openAdd)
+ 
+-        var budget = height - 28 - 30 // padding + header
+-
+-        // Progress (always worth showing when there are habits)
+-        val progressVisible = showProgress && total > 0 && budget >= 28
+-        val barIds = mapOf(
+-            "dusk" to R.id.widget_progress_dusk,
+-            "sunrise" to R.id.widget_progress_sunrise,
+-            "forest" to R.id.widget_progress_forest,
+-            "paper" to R.id.widget_progress_paper
+-        )
+-        for ((key, barId) in barIds) {
+-            views.setViewVisibility(
+-                barId, if (progressVisible && key == p.key) View.VISIBLE else View.GONE)
++        // Data
++        val day = data.getString("widget_day", "") ?: ""
++        val stale = day.isNotEmpty() && day != todayKey()
++        val showDoneTasks = (data.getString("widget_show_done_tasks", "1") ?: "1") == "1"
++        val allTasks = if (stale) JSONArray() else readArray(data, "widget_tasks")
++        val habits = if (stale) JSONArray() else readArray(data, "widget_habits")
++        var tasksDone = 0
++        for (i in 0 until allTasks.length()) {
++            if (allTasks.getJSONObject(i).optBoolean("d", false)) tasksDone++
+         }
+-        if (progressVisible) {
+-            val pct = if (total == 0) 0 else (done * 100) / total
+-            val barId = barIds[p.key] ?: R.id.widget_progress_dusk
+-            views.setProgressBar(barId, 100, pct, false)
+-            views.setTextViewText(
+-                R.id.widget_progress_label,
+-                if (done >= total) "All $total habits done today ✓" else "$done of $total habits done")
+-            views.setTextColor(R.id.widget_progress_label, p.muted)
+-            views.setViewVisibility(R.id.widget_progress_label, View.VISIBLE)
+-            budget -= 28
+-        } else {
+-            views.setViewVisibility(R.id.widget_progress_label, View.GONE)
++        var habitsDone = 0
++        for (i in 0 until habits.length()) {
++            if (habits.getJSONObject(i).optBoolean("d", false)) habitsDone++
+         }
+ 
+-        // Priority
+-        if (priority.isNotEmpty() && budget >= 22) {
+-            views.setTextViewText(R.id.widget_priority, "▸ $priority")
+-            views.setTextColor(R.id.widget_priority, p.text)
+-            views.setViewVisibility(R.id.widget_priority, View.VISIBLE)
+-            budget -= 24
+-        } else {
+-            views.setViewVisibility(R.id.widget_priority, View.GONE)
+-        }
++        val blocks = readArray(data, "widget_blocks")
++        views.removeAllViews(R.id.widget_content)
+ 
+-        // Habit rows
+-        val rowIds = intArrayOf(
+-            R.id.widget_h1, R.id.widget_h2, R.id.widget_h3, R.id.widget_h4, R.id.widget_h5)
+-        for (i in rowIds.indices) {
+-            if (i < habits.size && budget >= 20) {
+-                val h = habits[i]
+-                val mark = if (h.second) "✓  " else "○  "
+-                views.setTextViewText(rowIds[i], mark + h.first)
+-                views.setTextColor(rowIds[i], if (h.second) p.done else p.text)
+-                views.setViewVisibility(rowIds[i], View.VISIBLE)
+-                budget -= 20
+-            } else {
+-                views.setViewVisibility(rowIds[i], View.GONE)
++        for (b in 0 until blocks.length()) {
++            when (blocks.optString(b)) {
++                "stats" -> {
++                    if (budget >= 46) {
++                        val stats = readArray(data, "widget_stats")
++                        if (stats.length() > 0) {
++                            val child = RemoteViews(pkg, R.layout.widget_block_stats)
++                            val cells = intArrayOf(R.id.stat_c1, R.id.stat_c2, R.id.stat_c3, R.id.stat_c4)
++                            val values = intArrayOf(R.id.stat_v1, R.id.stat_v2, R.id.stat_v3, R.id.stat_v4)
++                            val labels = intArrayOf(R.id.stat_l1, R.id.stat_l2, R.id.stat_l3, R.id.stat_l4)
++                            for (i in 0 until 4) {
++                                if (i < stats.length()) {
++                                    val s = stats.getJSONObject(i)
++                                    val kind = s.optString("k")
++                                    var value = s.optString("v", "")
++                                    if (kind == "habits") {
++                                        value = if (stale || habits.length() == 0) "–" else "$habitsDone/${habits.length()}"
++                                    } else if (kind == "tasks") {
++                                        value = if (stale || allTasks.length() == 0) "–" else "$tasksDone/${allTasks.length()}"
++                                    }
++                                    child.setTextViewText(values[i], value)
++                                    child.setTextColor(values[i], p.text)
++                                    child.setTextViewText(labels[i], s.optString("l", ""))
++                                    child.setTextColor(labels[i], p.muted)
++                                    child.setViewVisibility(cells[i], View.VISIBLE)
++                                } else {
++                                    child.setViewVisibility(cells[i], View.GONE)
++                                }
++                            }
++                            views.addView(R.id.widget_content, child)
++                            budget -= 46
++                        }
++                    }
++                }
++                "progress" -> {
++                    val total = habits.length() + allTasks.length()
++                    if (budget >= 36 && total > 0) {
++                        val done = habitsDone + tasksDone
++                        val pct = (done * 100) / total
++                        val child = RemoteViews(pkg, R.layout.widget_block_progress)
++                        val bars = mapOf(
++                            "dusk" to R.id.progress_dusk,
++                            "sunrise" to R.id.progress_sunrise,
++                            "forest" to R.id.progress_forest,
++                            "paper" to R.id.progress_paper
++                        )
++                        for ((key, barId) in bars) {
++                            child.setViewVisibility(barId, if (key == p.key) View.VISIBLE else View.GONE)
++                        }
++                        val activeBar = bars[p.key] ?: R.id.progress_dusk
++                        child.setProgressBar(activeBar, 100, pct, false)
++                        child.setTextViewText(
++                            R.id.progress_label,
++                            if (done >= total) "Everything done today" else "$done of $total done today")
++                        child.setTextColor(R.id.progress_label, p.muted)
++                        views.addView(R.id.widget_content, child)
++                        budget -= 36
++                    }
++                }
++                "tasks" -> {
++                    budget = addList(
++                        context, views, p, budget, "task", "TO-DO",
++                        allTasks, stale, showDoneTasks,
++                        "No tasks yet. Tap + to add one.")
++                }
++                "habits" -> {
++                    budget = addList(
++                        context, views, p, budget, "habit", "HABITS",
++                        habits, stale, true,
++                        "No habits selected. Pick some in the app.")
++                }
++                "mantra" -> {
++                    val mantra = data.getString("widget_mantra", "") ?: ""
++                    if (mantra.isNotEmpty() && budget >= 44) {
++                        val child = RemoteViews(pkg, R.layout.widget_block_text)
++                        child.setTextViewText(R.id.text_body, "“$mantra”")
++                        child.setTextColor(R.id.text_body, p.text)
++                        views.addView(R.id.widget_content, child)
++                        budget -= 44
++                    }
++                }
+             }
+         }
++        return views
++    }
++
++    /**
++     * Adds a titled list (tasks or habits) as far as the remaining height
++     * allows, and returns the height left over.
++     */
++    private fun addList(
++        context: Context,
++        views: RemoteViews,
++        p: Palette,
++        budgetIn: Int,
++        kind: String,
++        title: String,
++        items: JSONArray,
++        stale: Boolean,
++        showDone: Boolean,
++        emptyText: String
++    ): Int {
++        var budget = budgetIn
++        val pkg = context.packageName
++        if (budget < 24 + 26) return budget
+ 
+-        // Mantra goes last: it is the first thing to drop when space is tight.
+-        if (mantra.isNotEmpty() && budget >= 34) {
+-            views.setTextViewText(R.id.widget_mantra, "“$mantra”")
+-            views.setTextColor(R.id.widget_mantra, p.text)
+-            views.setViewVisibility(R.id.widget_mantra, View.VISIBLE)
+-        } else {
+-            views.setViewVisibility(R.id.widget_mantra, View.GONE)
++        val open = openIntent(context, if (kind == "task") "tasks" else "dashboard")
++
++        // Rows that should be visible.
++        val rows = ArrayList<JSONObject>()
++        var doneCount = 0
++        for (i in 0 until items.length()) {
++            val o = items.getJSONObject(i)
++            if (o.optBoolean("d", false)) doneCount++
++            if (showDone || !o.optBoolean("d", false)) rows.add(o)
+         }
+ 
+-        val nothing = mantra.isEmpty() && priority.isEmpty() && habits.isEmpty()
+-        views.setTextColor(R.id.widget_empty, p.muted)
+-        views.setViewVisibility(R.id.widget_empty, if (nothing) View.VISIBLE else View.GONE)
+-
+-        // Tap anywhere to open the app.
+-        val launch = context.packageManager.getLaunchIntentForPackage(context.packageName)
+-        if (launch != null) {
+-            val pending = PendingIntent.getActivity(
+-                context, 0, launch,
+-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+-            views.setOnClickPendingIntent(R.id.widget_root, pending)
++        val header = RemoteViews(pkg, R.layout.widget_block_header)
++        header.setTextViewText(R.id.hdr_text, title)
++        header.setTextColor(R.id.hdr_text, p.muted)
++        header.setTextViewText(
++            R.id.hdr_count, if (items.length() == 0) "" else "$doneCount/${items.length()}")
++        header.setTextColor(R.id.hdr_count, p.muted)
++        if (open != null) header.setOnClickPendingIntent(R.id.hdr_text, open)
++        views.addView(R.id.widget_content, header)
++        budget -= 24
++
++        if (stale || rows.isEmpty()) {
++            val note = RemoteViews(pkg, R.layout.widget_block_text)
++            val text = if (stale) "New day. Tap to load today's list." else if (items.length() == 0) emptyText else "All done. Nicely done."
++            note.setTextViewText(R.id.text_body, text)
++            note.setTextColor(R.id.text_body, p.muted)
++            if (open != null) note.setOnClickPendingIntent(R.id.text_body, open)
++            views.addView(R.id.widget_content, note)
++            return budget - 34
+         }
+-        return views
+-    }
+ 
+-    private fun parseHabits(raw: String?): List<Pair<String, Boolean>> {
+-        val out = ArrayList<Pair<String, Boolean>>()
+-        if (raw.isNullOrEmpty()) return out
+-        try {
+-            val arr = JSONArray(raw)
+-            for (i in 0 until arr.length()) {
+-                val o = arr.getJSONObject(i)
+-                out.add(Pair(o.optString("name", ""), o.optBoolean("done", false)))
+-            }
+-        } catch (e: Exception) {
+-            // Malformed data: show nothing rather than crash the launcher.
++        var shown = 0
++        for (o in rows) {
++            if (budget < 26) break
++            val row = RemoteViews(pkg, R.layout.widget_row)
++            val done = o.optBoolean("d", false)
++            val name = if (kind == "task") o.optString("t") else o.optString("n")
++            val key = if (kind == "task") o.optString("t") else o.optString("id")
++            val index = if (kind == "task") o.optInt("i", -1) else -1
++            row.setTextViewText(R.id.row_text, name)
++            row.setTextColor(R.id.row_text, if (done) p.done else p.text)
++            row.setImageViewResource(
++                R.id.row_mark, if (done) R.drawable.widget_check_on else R.drawable.widget_check_off)
++            row.setInt(R.id.row_mark, "setColorFilter", if (done) p.done else p.accent)
++            row.setOnClickPendingIntent(R.id.row_mark, toggleIntent(context, kind, key, index))
++            if (open != null) row.setOnClickPendingIntent(R.id.row_text, open)
++            views.addView(R.id.widget_content, row)
++            budget -= 26
++            shown++
+         }
+-        return out
++        return budget
+     }
+ }
+diff --git a/android_overrides/widget/drawable-nodpi/widget_preview.png b/android_overrides/widget/drawable-nodpi/widget_preview.png
+index a913648400fdbebb648a9f4812ca978a5dbe0044..d675c9b67ddd765b5624443f1192364d21c6f15a 100644
+GIT binary patch
+literal 45294
+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
+
+literal 27337
+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
+NsH<ox=O~(Z{}(nqlsW(a
+
+diff --git a/android_overrides/widget/drawable/widget_check_off.xml b/android_overrides/widget/drawable/widget_check_off.xml
+new file mode 100644
+index 0000000..ccac82c
+--- /dev/null
++++ b/android_overrides/widget/drawable/widget_check_off.xml
+@@ -0,0 +1,12 @@
++<?xml version="1.0" encoding="utf-8"?>
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++    android:width="24dp"
++    android:height="24dp"
++    android:viewportWidth="24"
++    android:viewportHeight="24">
++    <path
++        android:fillColor="#00000000"
++        android:pathData="M12,3.5a8.5,8.5 0 1,0 0,17a8.5,8.5 0 1,0 0,-17"
++        android:strokeColor="#FFFFFFFF"
++        android:strokeWidth="2" />
++</vector>
+diff --git a/android_overrides/widget/drawable/widget_check_on.xml b/android_overrides/widget/drawable/widget_check_on.xml
+new file mode 100644
+index 0000000..98261a2
+--- /dev/null
++++ b/android_overrides/widget/drawable/widget_check_on.xml
+@@ -0,0 +1,19 @@
++<?xml version="1.0" encoding="utf-8"?>
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++    android:width="24dp"
++    android:height="24dp"
++    android:viewportWidth="24"
++    android:viewportHeight="24">
++    <path
++        android:fillColor="#00000000"
++        android:pathData="M12,3.5a8.5,8.5 0 1,0 0,17a8.5,8.5 0 1,0 0,-17"
++        android:strokeColor="#FFFFFFFF"
++        android:strokeWidth="2" />
++    <path
++        android:fillColor="#00000000"
++        android:pathData="M7.8,12.4l3,3l5.6,-6.2"
++        android:strokeColor="#FFFFFFFF"
++        android:strokeLineCap="round"
++        android:strokeLineJoin="round"
++        android:strokeWidth="2.2" />
++</vector>
+diff --git a/android_overrides/widget/habits_widget.xml b/android_overrides/widget/habits_widget.xml
+deleted file mode 100644
+index 7487943..0000000
+--- a/android_overrides/widget/habits_widget.xml
++++ /dev/null
+@@ -1,179 +0,0 @@
+-<?xml version="1.0" encoding="utf-8"?>
+-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+-    android:id="@+id/widget_root"
+-    android:layout_width="match_parent"
+-    android:layout_height="match_parent"
+-    android:orientation="vertical"
+-    android:background="@drawable/widget_bg_dusk"
+-    android:padding="14dp">
+-
+-    <LinearLayout
+-        android:layout_width="match_parent"
+-        android:layout_height="wrap_content"
+-        android:gravity="center_vertical"
+-        android:orientation="horizontal">
+-
+-        <TextView
+-            android:id="@+id/widget_title"
+-            android:layout_width="0dp"
+-            android:layout_height="wrap_content"
+-            android:layout_weight="1"
+-            android:maxLines="1"
+-            android:text="Prakriyā"
+-            android:textColor="#F2B93B"
+-            android:textSize="14sp"
+-            android:textStyle="bold" />
+-
+-        <TextView
+-            android:id="@+id/widget_streak"
+-            android:layout_width="wrap_content"
+-            android:layout_height="wrap_content"
+-            android:maxLines="1"
+-            android:textColor="#F2B93B"
+-            android:textSize="12sp"
+-            android:textStyle="bold" />
+-    </LinearLayout>
+-
+-    <TextView
+-        android:id="@+id/widget_date"
+-        android:layout_width="match_parent"
+-        android:layout_height="wrap_content"
+-        android:maxLines="1"
+-        android:textColor="#A99BD0"
+-        android:textSize="10sp" />
+-
+-    <TextView
+-        android:id="@+id/widget_mantra"
+-        android:layout_width="match_parent"
+-        android:layout_height="wrap_content"
+-        android:layout_marginTop="8dp"
+-        android:ellipsize="end"
+-        android:maxLines="2"
+-        android:textColor="#F4EEFF"
+-        android:textSize="12sp"
+-        android:textStyle="italic" />
+-
+-    <TextView
+-        android:id="@+id/widget_priority"
+-        android:layout_width="match_parent"
+-        android:layout_height="wrap_content"
+-        android:layout_marginTop="8dp"
+-        android:ellipsize="end"
+-        android:maxLines="1"
+-        android:textColor="#FFFFFF"
+-        android:textSize="12sp"
+-        android:textStyle="bold" />
+-
+-    <TextView
+-        android:id="@+id/widget_progress_label"
+-        android:layout_width="match_parent"
+-        android:layout_height="wrap_content"
+-        android:layout_marginTop="8dp"
+-        android:maxLines="1"
+-        android:textColor="#A99BD0"
+-        android:textSize="11sp" />
+-
+-    <ProgressBar
+-        android:id="@+id/widget_progress_dusk"
+-        style="?android:attr/progressBarStyleHorizontal"
+-        android:layout_width="match_parent"
+-        android:layout_height="6dp"
+-        android:layout_marginTop="4dp"
+-        android:max="100"
+-        android:progress="0"
+-        android:progressDrawable="@drawable/widget_progress_dusk" />
+-
+-    <ProgressBar
+-        android:id="@+id/widget_progress_sunrise"
+-        style="?android:attr/progressBarStyleHorizontal"
+-        android:layout_width="match_parent"
+-        android:layout_height="6dp"
+-        android:layout_marginTop="4dp"
+-        android:max="100"
+-        android:progress="0"
+-        android:progressDrawable="@drawable/widget_progress_sunrise"
+-        android:visibility="gone" />
+-
+-    <ProgressBar
+-        android:id="@+id/widget_progress_forest"
+-        style="?android:attr/progressBarStyleHorizontal"
+-        android:layout_width="match_parent"
+-        android:layout_height="6dp"
+-        android:layout_marginTop="4dp"
+-        android:max="100"
+-        android:progress="0"
+-        android:progressDrawable="@drawable/widget_progress_forest"
+-        android:visibility="gone" />
+-
+-    <ProgressBar
+-        android:id="@+id/widget_progress_paper"
+-        style="?android:attr/progressBarStyleHorizontal"
+-        android:layout_width="match_parent"
+-        android:layout_height="6dp"
+-        android:layout_marginTop="4dp"
+-        android:max="100"
+-        android:progress="0"
+-        android:progressDrawable="@drawable/widget_progress_paper"
+-        android:visibility="gone" />
+-
+-    <TextView
+-        android:id="@+id/widget_h1"
+-        android:layout_width="match_parent"
+-        android:layout_height="wrap_content"
+-        android:layout_marginTop="6dp"
+-        android:ellipsize="end"
+-        android:maxLines="1"
+-        android:textColor="#F4EEFF"
+-        android:textSize="12sp" />
+-
+-    <TextView
+-        android:id="@+id/widget_h2"
+-        android:layout_width="match_parent"
+-        android:layout_height="wrap_content"
+-        android:layout_marginTop="3dp"
+-        android:ellipsize="end"
+-        android:maxLines="1"
+-        android:textColor="#F4EEFF"
+-        android:textSize="12sp" />
+-
+-    <TextView
+-        android:id="@+id/widget_h3"
+-        android:layout_width="match_parent"
+-        android:layout_height="wrap_content"
+-        android:layout_marginTop="3dp"
+-        android:ellipsize="end"
+-        android:maxLines="1"
+-        android:textColor="#F4EEFF"
+-        android:textSize="12sp" />
+-
+-    <TextView
+-        android:id="@+id/widget_h4"
+-        android:layout_width="match_parent"
+-        android:layout_height="wrap_content"
+-        android:layout_marginTop="3dp"
+-        android:ellipsize="end"
+-        android:maxLines="1"
+-        android:textColor="#F4EEFF"
+-        android:textSize="12sp" />
+-
+-    <TextView
+-        android:id="@+id/widget_h5"
+-        android:layout_width="match_parent"
+-        android:layout_height="wrap_content"
+-        android:layout_marginTop="3dp"
+-        android:ellipsize="end"
+-        android:maxLines="1"
+-        android:textColor="#F4EEFF"
+-        android:textSize="12sp" />
+-
+-    <TextView
+-        android:id="@+id/widget_empty"
+-        android:layout_width="match_parent"
+-        android:layout_height="wrap_content"
+-        android:layout_marginTop="8dp"
+-        android:text="Open Prakriyā to set up your day."
+-        android:textColor="#A99BD0"
+-        android:textSize="11sp"
+-        android:visibility="gone" />
+-
+-</LinearLayout>
+diff --git a/android_overrides/widget/habits_widget_info.xml b/android_overrides/widget/habits_widget_info.xml
+index 2e659c5..4cc02d0 100644
+--- a/android_overrides/widget/habits_widget_info.xml
++++ b/android_overrides/widget/habits_widget_info.xml
+@@ -1,11 +1,11 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+     android:minWidth="250dp"
+-    android:minHeight="110dp"
++    android:minHeight="180dp"
+     android:minResizeWidth="180dp"
+     android:minResizeHeight="80dp"
+     android:targetCellWidth="4"
+-    android:targetCellHeight="2"
++    android:targetCellHeight="3"
+     android:updatePeriodMillis="1800000"
+     android:initialLayout="@layout/habits_widget"
+     android:previewImage="@drawable/widget_preview"
+diff --git a/android_overrides/widget/layout/habits_widget.xml b/android_overrides/widget/layout/habits_widget.xml
+new file mode 100644
+index 0000000..a90e8ee
+--- /dev/null
++++ b/android_overrides/widget/layout/habits_widget.xml
+@@ -0,0 +1,60 @@
++<?xml version="1.0" encoding="utf-8"?>
++<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
++    android:id="@+id/widget_root"
++    android:layout_width="match_parent"
++    android:layout_height="match_parent"
++    android:orientation="vertical"
++    android:background="@drawable/widget_bg_dusk"
++    android:padding="12dp">
++
++    <LinearLayout
++        android:layout_width="match_parent"
++        android:layout_height="wrap_content"
++        android:gravity="center_vertical"
++        android:orientation="horizontal">
++
++        <LinearLayout
++            android:id="@+id/widget_head"
++            android:layout_width="0dp"
++            android:layout_height="wrap_content"
++            android:layout_weight="1"
++            android:orientation="vertical">
++
++            <TextView
++                android:id="@+id/widget_title"
++                android:layout_width="match_parent"
++                android:layout_height="wrap_content"
++                android:maxLines="1"
++                android:text="Prakriyā"
++                android:textColor="#F2B93B"
++                android:textSize="14sp"
++                android:textStyle="bold" />
++
++            <TextView
++                android:id="@+id/widget_date"
++                android:layout_width="match_parent"
++                android:layout_height="wrap_content"
++                android:maxLines="1"
++                android:textColor="#A99BD0"
++                android:textSize="10sp" />
++        </LinearLayout>
++
++        <TextView
++            android:id="@+id/widget_add"
++            android:layout_width="34dp"
++            android:layout_height="34dp"
++            android:gravity="center"
++            android:text="+"
++            android:textColor="#F2B93B"
++            android:textSize="24sp"
++            android:textStyle="bold" />
++    </LinearLayout>
++
++    <LinearLayout
++        android:id="@+id/widget_content"
++        android:layout_width="match_parent"
++        android:layout_height="wrap_content"
++        android:layout_marginTop="6dp"
++        android:orientation="vertical" />
++
++</LinearLayout>
+diff --git a/android_overrides/widget/layout/widget_block_header.xml b/android_overrides/widget/layout/widget_block_header.xml
+new file mode 100644
+index 0000000..a6e9b28
+--- /dev/null
++++ b/android_overrides/widget/layout/widget_block_header.xml
+@@ -0,0 +1,25 @@
++<?xml version="1.0" encoding="utf-8"?>
++<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
++    android:layout_width="match_parent"
++    android:layout_height="wrap_content"
++    android:layout_marginTop="8dp"
++    android:orientation="horizontal">
++
++    <TextView
++        android:id="@+id/hdr_text"
++        android:layout_width="0dp"
++        android:layout_height="wrap_content"
++        android:layout_weight="1"
++        android:maxLines="1"
++        android:textColor="#A99BD0"
++        android:textSize="10sp"
++        android:textStyle="bold" />
++
++    <TextView
++        android:id="@+id/hdr_count"
++        android:layout_width="wrap_content"
++        android:layout_height="wrap_content"
++        android:maxLines="1"
++        android:textColor="#A99BD0"
++        android:textSize="10sp" />
++</LinearLayout>
+diff --git a/android_overrides/widget/layout/widget_block_progress.xml b/android_overrides/widget/layout/widget_block_progress.xml
+new file mode 100644
+index 0000000..53e2b61
+--- /dev/null
++++ b/android_overrides/widget/layout/widget_block_progress.xml
+@@ -0,0 +1,59 @@
++<?xml version="1.0" encoding="utf-8"?>
++<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
++    android:layout_width="match_parent"
++    android:layout_height="wrap_content"
++    android:layout_marginTop="6dp"
++    android:orientation="vertical">
++
++    <TextView
++        android:id="@+id/progress_label"
++        android:layout_width="match_parent"
++        android:layout_height="wrap_content"
++        android:maxLines="1"
++        android:textColor="#A99BD0"
++        android:textSize="11sp" />
++
++    <ProgressBar
++        android:id="@+id/progress_dusk"
++        style="?android:attr/progressBarStyleHorizontal"
++        android:layout_width="match_parent"
++        android:layout_height="6dp"
++        android:layout_marginTop="4dp"
++        android:max="100"
++        android:progress="0"
++        android:progressDrawable="@drawable/widget_progress_dusk" />
++
++    <ProgressBar
++        android:id="@+id/progress_sunrise"
++        style="?android:attr/progressBarStyleHorizontal"
++        android:layout_width="match_parent"
++        android:layout_height="6dp"
++        android:layout_marginTop="4dp"
++        android:max="100"
++        android:progress="0"
++        android:progressDrawable="@drawable/widget_progress_sunrise"
++        android:visibility="gone" />
++
++    <ProgressBar
++        android:id="@+id/progress_forest"
++        style="?android:attr/progressBarStyleHorizontal"
++        android:layout_width="match_parent"
++        android:layout_height="6dp"
++        android:layout_marginTop="4dp"
++        android:max="100"
++        android:progress="0"
++        android:progressDrawable="@drawable/widget_progress_forest"
++        android:visibility="gone" />
++
++    <ProgressBar
++        android:id="@+id/progress_paper"
++        style="?android:attr/progressBarStyleHorizontal"
++        android:layout_width="match_parent"
++        android:layout_height="6dp"
++        android:layout_marginTop="4dp"
++        android:max="100"
++        android:progress="0"
++        android:progressDrawable="@drawable/widget_progress_paper"
++        android:visibility="gone" />
++
++</LinearLayout>
+diff --git a/android_overrides/widget/layout/widget_block_stats.xml b/android_overrides/widget/layout/widget_block_stats.xml
+new file mode 100644
+index 0000000..2dacb77
+--- /dev/null
++++ b/android_overrides/widget/layout/widget_block_stats.xml
+@@ -0,0 +1,99 @@
++<?xml version="1.0" encoding="utf-8"?>
++<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
++    android:layout_width="match_parent"
++    android:layout_height="wrap_content"
++    android:layout_marginTop="4dp"
++    android:orientation="horizontal">
++
++    <LinearLayout
++        android:id="@+id/stat_c1"
++        android:layout_width="0dp"
++        android:layout_height="wrap_content"
++        android:layout_weight="1"
++        android:orientation="vertical">
++        <TextView
++            android:id="@+id/stat_v1"
++            android:layout_width="match_parent"
++            android:layout_height="wrap_content"
++            android:maxLines="1"
++            android:textColor="#F4EEFF"
++            android:textSize="18sp"
++            android:textStyle="bold" />
++        <TextView
++            android:id="@+id/stat_l1"
++            android:layout_width="match_parent"
++            android:layout_height="wrap_content"
++            android:maxLines="1"
++            android:textColor="#A99BD0"
++            android:textSize="10sp" />
++    </LinearLayout>
++
++    <LinearLayout
++        android:id="@+id/stat_c2"
++        android:layout_width="0dp"
++        android:layout_height="wrap_content"
++        android:layout_weight="1"
++        android:orientation="vertical">
++        <TextView
++            android:id="@+id/stat_v2"
++            android:layout_width="match_parent"
++            android:layout_height="wrap_content"
++            android:maxLines="1"
++            android:textColor="#F4EEFF"
++            android:textSize="18sp"
++            android:textStyle="bold" />
++        <TextView
++            android:id="@+id/stat_l2"
++            android:layout_width="match_parent"
++            android:layout_height="wrap_content"
++            android:maxLines="1"
++            android:textColor="#A99BD0"
++            android:textSize="10sp" />
++    </LinearLayout>
++
++    <LinearLayout
++        android:id="@+id/stat_c3"
++        android:layout_width="0dp"
++        android:layout_height="wrap_content"
++        android:layout_weight="1"
++        android:orientation="vertical">
++        <TextView
++            android:id="@+id/stat_v3"
++            android:layout_width="match_parent"
++            android:layout_height="wrap_content"
++            android:maxLines="1"
++            android:textColor="#F4EEFF"
++            android:textSize="18sp"
++            android:textStyle="bold" />
++        <TextView
++            android:id="@+id/stat_l3"
++            android:layout_width="match_parent"
++            android:layout_height="wrap_content"
++            android:maxLines="1"
++            android:textColor="#A99BD0"
++            android:textSize="10sp" />
++    </LinearLayout>
++
++    <LinearLayout
++        android:id="@+id/stat_c4"
++        android:layout_width="0dp"
++        android:layout_height="wrap_content"
++        android:layout_weight="1"
++        android:orientation="vertical">
++        <TextView
++            android:id="@+id/stat_v4"
++            android:layout_width="match_parent"
++            android:layout_height="wrap_content"
++            android:maxLines="1"
++            android:textColor="#F4EEFF"
++            android:textSize="18sp"
++            android:textStyle="bold" />
++        <TextView
++            android:id="@+id/stat_l4"
++            android:layout_width="match_parent"
++            android:layout_height="wrap_content"
++            android:maxLines="1"
++            android:textColor="#A99BD0"
++            android:textSize="10sp" />
++    </LinearLayout>
++</LinearLayout>
+diff --git a/android_overrides/widget/layout/widget_block_text.xml b/android_overrides/widget/layout/widget_block_text.xml
+new file mode 100644
+index 0000000..f5f2129
+--- /dev/null
++++ b/android_overrides/widget/layout/widget_block_text.xml
+@@ -0,0 +1,16 @@
++<?xml version="1.0" encoding="utf-8"?>
++<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
++    android:layout_width="match_parent"
++    android:layout_height="wrap_content"
++    android:orientation="vertical">
++
++    <TextView
++        android:id="@+id/text_body"
++        android:layout_width="match_parent"
++        android:layout_height="wrap_content"
++        android:layout_marginTop="8dp"
++        android:ellipsize="end"
++        android:maxLines="2"
++        android:textColor="#F4EEFF"
++        android:textSize="12sp" />
++</LinearLayout>
+diff --git a/android_overrides/widget/layout/widget_row.xml b/android_overrides/widget/layout/widget_row.xml
+new file mode 100644
+index 0000000..2aa2e78
+--- /dev/null
++++ b/android_overrides/widget/layout/widget_row.xml
+@@ -0,0 +1,29 @@
++<?xml version="1.0" encoding="utf-8"?>
++<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
++    android:layout_width="match_parent"
++    android:layout_height="wrap_content"
++    android:gravity="center_vertical"
++    android:orientation="horizontal">
++
++    <ImageView
++        android:id="@+id/row_mark"
++        android:layout_width="36dp"
++        android:layout_height="26dp"
++        android:paddingStart="2dp"
++        android:paddingTop="4dp"
++        android:paddingEnd="8dp"
++        android:paddingBottom="4dp"
++        android:scaleType="centerInside"
++        android:src="@drawable/widget_check_off" />
++
++    <TextView
++        android:id="@+id/row_text"
++        android:layout_width="0dp"
++        android:layout_height="26dp"
++        android:layout_weight="1"
++        android:ellipsize="end"
++        android:gravity="center_vertical"
++        android:maxLines="1"
++        android:textColor="#F4EEFF"
++        android:textSize="13sp" />
++</LinearLayout>
+diff --git a/android_overrides/widget/values/widget_strings.xml b/android_overrides/widget/values/widget_strings.xml
+index bc504b0..109e6c4 100644
+--- a/android_overrides/widget/values/widget_strings.xml
++++ b/android_overrides/widget/values/widget_strings.xml
+@@ -1,4 +1,4 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <resources>
+-    <string name="prakriya_widget_description">Your habits, top priority and mantra at a glance.</string>
++    <string name="prakriya_widget_description">Your dashboard and to-do list. Tick tasks and habits right here.</string>
+ </resources>
+diff --git a/lib/main.dart b/lib/main.dart
+index 71a60c8..97aeba3 100644
+--- a/lib/main.dart
++++ b/lib/main.dart
+@@ -269,6 +269,11 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
+         state == AppLifecycleState.detached) {
+       unawaited(store.flush());
+     }
++    // Ticks made on the home-screen widget while the app was away are queued
++    // natively; apply them as soon as the app is back in front.
++    if (state == AppLifecycleState.resumed) {
++      unawaited(HomeWidgetService.instance.syncFromWidget());
++    }
+     if (!store.hasPin || !store.onboardingComplete) return;
+     if (state == AppLifecycleState.paused) {
+       _pausedAt ??= DateTime.now();
+diff --git a/lib/screens/home_screen.dart b/lib/screens/home_screen.dart
+index 311821c..c4cf40c 100644
+--- a/lib/screens/home_screen.dart
++++ b/lib/screens/home_screen.dart
+@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
+ import 'package:flutter/services.dart' show HapticFeedback;
+ 
+ import '../models.dart';
++import '../services/home_widget_service.dart';
+ import '../store.dart';
+ import '../theme.dart';
+ import '../widgets/boosters.dart';
+@@ -96,6 +97,29 @@ class _HomeScreenState extends State<HomeScreen> {
+   void initState() {
+     super.initState();
+     WidgetsBinding.instance.addPostFrameCallback((_) => _maybeShowDailyPrompts());
++    // A tap on the home-screen widget asks us to open a screen. The request
++    // is held in HomeWidgetService until this screen exists, so a PIN lock
++    // is never bypassed.
++    HomeWidgetService.instance.pendingOpen.addListener(_openFromWidget);
++    WidgetsBinding.instance.addPostFrameCallback((_) => _openFromWidget());
++  }
++
++  @override
++  void dispose() {
++    HomeWidgetService.instance.pendingOpen.removeListener(_openFromWidget);
++    super.dispose();
++  }
++
++  void _openFromWidget() {
++    if (!mounted) return;
++    final target = HomeWidgetService.instance.pendingOpen.value;
++    if (target == null) return;
++    HomeWidgetService.instance.pendingOpen.value = null;
++    if (target == 'tasks' || target == 'addtask') {
++      _openTodos();
++    } else {
++      setState(() => _tabIndex = 0);
++    }
+   }
+ 
+   Future<void> _maybeShowDailyPrompts() async {
+diff --git a/lib/screens/widget_studio_screen.dart b/lib/screens/widget_studio_screen.dart
+index 0a98403..19333e6 100644
+--- a/lib/screens/widget_studio_screen.dart
++++ b/lib/screens/widget_studio_screen.dart
+@@ -7,8 +7,9 @@ import '../store.dart';
+ import '../theme.dart';
+ import '../widgets/common.dart';
+ 
+-/// Design the Android home-screen widget: pick a look, choose what it shows,
+-/// see a live preview (tap a habit to tick it) and add it to the home screen.
++/// Design the Android home-screen widget: choose what it shows and in what
++/// order, edit today's to-do list, and see an exact live preview. The preview
++/// is interactive: tick tasks and habits, tap a task to edit or delete it.
+ class WidgetStudioScreen extends StatefulWidget {
+   const WidgetStudioScreen({super.key});
+ 
+@@ -28,7 +29,29 @@ class _WidgetStudioScreenState extends State<WidgetStudioScreen> {
+     });
+   }
+ 
+-  Future<void> _toggleHabit(Habit h) async {
++  Future<void> _addTask() async {
++    final result = await showDialog<_TaskEdit>(
++      context: context,
++      builder: (_) => const _TaskDialog(),
++    );
++    if (result == null || result.delete) return;
++    await store.addTask(result.text);
++  }
++
++  Future<void> _editTask(WidgetTaskLine line) async {
++    final result = await showDialog<_TaskEdit>(
++      context: context,
++      builder: (_) => _TaskDialog(initial: line.task.title),
++    );
++    if (result == null) return;
++    if (result.delete) {
++      await store.removeTask(line.index);
++    } else {
++      await store.renameTask(line.index, result.text);
++    }
++  }
++
++  Future<void> _toggleHabitInWidget(Habit h) async {
+     final all = store.habits.map((x) => x.id).toList();
+     final current = all.where(store.widgetHabitSelected).toSet();
+     if (current.contains(h.id)) {
+@@ -36,7 +59,7 @@ class _WidgetStudioScreenState extends State<WidgetStudioScreen> {
+         ScaffoldMessenger.of(context)
+           ..hideCurrentSnackBar()
+           ..showSnackBar(const SnackBar(
+-              content: Text('Keep at least one habit, or switch the checklist off.')));
++              content: Text('Keep at least one habit, or switch the habit checklist off.')));
+         return;
+       }
+       current.remove(h.id);
+@@ -47,21 +70,36 @@ class _WidgetStudioScreenState extends State<WidgetStudioScreen> {
+         current.length == all.length ? <String>[] : current.toList());
+   }
+ 
++  void _toggleStat(String key) {
++    final current = List<String>.from(extras.widgetStats);
++    if (current.contains(key)) {
++      current.remove(key);
++    } else {
++      if (current.length >= 4) {
++        ScaffoldMessenger.of(context)
++          ..hideCurrentSnackBar()
++          ..showSnackBar(
++              const SnackBar(content: Text('Up to four stats. Remove one first.')));
++        return;
++      }
++      current.add(key);
++    }
++    extras.setWidgetStats(current);
++  }
++
+   Future<void> _addToHome() async {
+     if (_busy) return;
+     setState(() => _busy = true);
+-    var shownHelp = false;
++    var needHelp = false;
+     if (_canPin == true) {
+       final ok = await HomeWidgetService.instance.requestPin();
+-      if (!ok) shownHelp = true;
++      if (!ok) needHelp = true;
+     } else {
+-      shownHelp = true;
++      needHelp = true;
+     }
+     if (!mounted) return;
+     setState(() => _busy = false);
+-    if (shownHelp) {
+-      _showHowTo();
+-    }
++    if (needHelp) _showHowTo();
+   }
+ 
+   void _showHowTo() {
+@@ -83,7 +121,7 @@ class _WidgetStudioScreenState extends State<WidgetStudioScreen> {
+               'Press and hold an empty spot on your home screen.',
+               'Tap "Widgets".',
+               'Find "Prakriyā" and press and hold the widget.',
+-              'Drag it where you want it, then drop it.',
++              'Drag it where you want it, then drop it. Make it taller to see more.',
+             ])
+               Padding(
+                 padding: const EdgeInsets.only(bottom: 8),
+@@ -121,12 +159,14 @@ class _WidgetStudioScreenState extends State<WidgetStudioScreen> {
+             builder: (context, _) {
+               final snap = HomeWidgetService.instance.snapshot();
+               final habits = store.habits;
++              final habitsOn = extras.widgetBlockOn('habits');
++              final statsOn = extras.widgetBlockOn('stats');
+               return Column(
+                 children: [
+                   const ScreenHeader(
+                     icon: Icons.widgets_outlined,
+                     title: 'Widget studio',
+-                    subtitle: 'Design what you see on your home screen',
++                    subtitle: 'Your dashboard and to-do list on the home screen',
+                   ),
+                   Expanded(
+                     child: ListView(
+@@ -136,13 +176,19 @@ class _WidgetStudioScreenState extends State<WidgetStudioScreen> {
+                         const SizedBox(height: 10),
+                         Center(
+                           child: ConstrainedBox(
+-                            constraints: const BoxConstraints(maxWidth: 380),
+-                            child: _WidgetPreview(snap: snap),
++                            constraints: const BoxConstraints(maxWidth: 400),
++                            child: _WidgetPreview(
++                              snap: snap,
++                              onAddTask: _addTask,
++                              onEditTask: _editTask,
++                              onToggleTask: (line) => store.toggleTask(line.index),
++                              onToggleHabit: (h) => store.toggleHabit(h),
++                            ),
+                           ),
+                         ),
+                         const SizedBox(height: 8),
+                         Text(
+-                            'Tap a habit above to tick it. The widget on your home screen follows.',
++                            'Same as your home screen. Tick things off, tap a task to edit or delete it, or tap + to add one.',
+                             textAlign: TextAlign.center,
+                             style: body(11.5, Surfaces.muted(dark))),
+                         const SizedBox(height: 18),
+@@ -160,66 +206,82 @@ class _WidgetStudioScreenState extends State<WidgetStudioScreen> {
+                                 style: body(11.5, Surfaces.muted(dark))),
+                           ),
+                         const SizedBox(height: 24),
+-                        Text('LOOK', style: label(Surfaces.muted(dark))),
+-                        const SizedBox(height: 10),
+-                        Row(
+-                          children: [
+-                            for (final option in kWidgetStyles)
+-                              Expanded(
+-                                child: _StyleSwatch(
+-                                  option: option,
+-                                  selected: extras.widgetStyle == option.key,
+-                                  onTap: () =>
+-                                      extras.setWidgetLook(style: option.key),
+-                                ),
+-                              ),
+-                          ],
+-                        ),
+-                        const SizedBox(height: 24),
+-                        Text('WHAT IT SHOWS', style: label(Surfaces.muted(dark))),
++                        Text('WHAT SHOWS, AND IN WHAT ORDER',
++                            style: label(Surfaces.muted(dark))),
++                        const SizedBox(height: 6),
++                        Text('Switch blocks on or off. Press and drag the handle to reorder.',
++                            style: body(11.5, Surfaces.muted(dark))),
+                         const SizedBox(height: 10),
+                         ModuleCard(
+-                          child: Column(
++                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
++                          child: ReorderableListView(
++                            shrinkWrap: true,
++                            physics: const NeverScrollableScrollPhysics(),
++                            buildDefaultDragHandles: false,
++                            onReorder: (oldIndex, newIndex) {
++                              if (newIndex > oldIndex) newIndex -= 1;
++                              final list = List<String>.from(extras.widgetOrder);
++                              final item = list.removeAt(oldIndex);
++                              list.insert(newIndex, item);
++                              extras.setWidgetOrder(list);
++                            },
+                             children: [
+-                              _ToggleRow(
+-                                label: "Today's habits checklist",
+-                                value: store.widgetShowHabits,
+-                                onChanged: (v) => store.setWidgetShowHabits(v),
+-                              ),
+-                              _ToggleRow(
+-                                label: 'Progress bar',
+-                                value: extras.widgetShowProgress,
+-                                onChanged: (v) =>
+-                                    extras.setWidgetLook(progress: v),
+-                              ),
+-                              _ToggleRow(
+-                                label: 'Top to-do',
+-                                value: store.widgetShowPriorities,
+-                                onChanged: (v) =>
+-                                    store.setWidgetShowPriorities(v),
+-                              ),
+-                              _ToggleRow(
+-                                label: "Today's mantra",
+-                                value: store.widgetShowMantra,
+-                                onChanged: (v) => store.setWidgetShowMantra(v),
+-                              ),
+-                              _ToggleRow(
+-                                label: 'Streak counter',
+-                                value: extras.widgetShowStreak,
+-                                onChanged: (v) =>
+-                                    extras.setWidgetLook(streak: v),
+-                              ),
++                              for (var i = 0; i < extras.widgetOrder.length; i++)
++                                _BlockRow(
++                                  key: ValueKey<String>(extras.widgetOrder[i]),
++                                  index: i,
++                                  blockKey: extras.widgetOrder[i],
++                                  on: extras.widgetBlockOn(extras.widgetOrder[i]),
++                                  onChanged: (v) =>
++                                      extras.setWidgetBlockOn(extras.widgetOrder[i], v),
++                                ),
+                             ],
+                           ),
+                         ),
+-                        if (store.widgetShowHabits && habits.isNotEmpty) ...[
++                        if (statsOn) ...[
++                          const SizedBox(height: 24),
++                          Text('DASHBOARD STATS', style: label(Surfaces.muted(dark))),
++                          const SizedBox(height: 6),
++                          Text('Pick up to four.',
++                              style: body(11.5, Surfaces.muted(dark))),
++                          const SizedBox(height: 10),
++                          Wrap(
++                            spacing: 8,
++                            runSpacing: 8,
++                            children: [
++                              for (final option in kWidgetStatOptions)
++                                _HabitChip(
++                                  name: option.$2,
++                                  selected: extras.widgetStats.contains(option.$1),
++                                  onTap: () => _toggleStat(option.$1),
++                                ),
++                            ],
++                          ),
++                        ],
++                        if (extras.widgetBlockOn('tasks')) ...[
++                          const SizedBox(height: 24),
++                          ModuleCard(
++                            child: Row(
++                              children: [
++                                Expanded(
++                                  child: Text('Keep finished tasks in the list',
++                                      style: body(13.5, Surfaces.bodyText(dark),
++                                          weight: FontWeight.w500)),
++                                ),
++                                Switch(
++                                  value: extras.widgetShowDoneTasks,
++                                  activeTrackColor: Surfaces.accent(dark),
++                                  onChanged: extras.setWidgetShowDoneTasks,
++                                ),
++                              ],
++                            ),
++                          ),
++                        ],
++                        if (habitsOn && habits.isNotEmpty) ...[
+                           const SizedBox(height: 24),
+                           Text('WHICH HABITS', style: label(Surfaces.muted(dark))),
+                           const SizedBox(height: 6),
+-                          Text(
+-                              habits.length > 5
+-                                  ? 'The widget lists up to 5 habits. Progress counts every habit you select.'
+-                                  : 'Tap to include or leave out a habit.',
++                          Text('Tap to include or leave out a habit.',
+                               style: body(11.5, Surfaces.muted(dark))),
+                           const SizedBox(height: 10),
+                           Wrap(
+@@ -230,12 +292,27 @@ class _WidgetStudioScreenState extends State<WidgetStudioScreen> {
+                                 _HabitChip(
+                                   name: h.name,
+                                   selected: store.widgetHabitSelected(h.id),
+-                                  onTap: () => _toggleHabit(h),
++                                  onTap: () => _toggleHabitInWidget(h),
+                                 ),
+                             ],
+                           ),
+                         ],
+                         const SizedBox(height: 24),
++                        Text('LOOK', style: label(Surfaces.muted(dark))),
++                        const SizedBox(height: 10),
++                        Row(
++                          children: [
++                            for (final option in kWidgetStyles)
++                              Expanded(
++                                child: _StyleSwatch(
++                                  option: option,
++                                  selected: extras.widgetStyle == option.key,
++                                  onTap: () => extras.setWidgetStyle(option.key),
++                                ),
++                              ),
++                          ],
++                        ),
++                        const SizedBox(height: 24),
+                         ModuleCard(
+                           child: Column(
+                             crossAxisAlignment: CrossAxisAlignment.start,
+@@ -245,7 +322,7 @@ class _WidgetStudioScreenState extends State<WidgetStudioScreen> {
+                                       weight: FontWeight.w700)),
+                               const SizedBox(height: 8),
+                               Text(
+-                                  'The widget refreshes whenever you change something in the app, and about every 30 minutes on its own. Tap it to open Prakriyā. You can resize it: a taller widget shows more.',
++                                  'On the widget, tap a circle to tick a task or habit. Tap a title to open your list. Tap + to add a task. Ticks are saved to the app the next time it opens. A taller widget shows more rows. It refreshes whenever you change something here, and about every 30 minutes on its own.',
+                                   style: body(12.5, Surfaces.muted(dark))
+                                       .copyWith(height: 1.45)),
+                               const SizedBox(height: 10),
+@@ -281,9 +358,136 @@ class _WidgetStudioScreenState extends State<WidgetStudioScreen> {
+   }
+ }
+ 
++class _TaskEdit {
++  final String text;
++  final bool delete;
++  const _TaskEdit(this.text, this.delete);
++}
++
++class _TaskDialog extends StatefulWidget {
++  final String? initial;
++  const _TaskDialog({this.initial});
++
++  @override
++  State<_TaskDialog> createState() => _TaskDialogState();
++}
++
++class _TaskDialogState extends State<_TaskDialog> {
++  late final TextEditingController _controller =
++      TextEditingController(text: widget.initial ?? '');
++
++  @override
++  void dispose() {
++    _controller.dispose();
++    super.dispose();
++  }
++
++  void _save() {
++    final text = _controller.text.trim();
++    if (text.isEmpty) return;
++    Navigator.of(context).pop(_TaskEdit(text, false));
++  }
++
++  @override
++  Widget build(BuildContext context) {
++    final editing = widget.initial != null;
++    return AlertDialog(
++      title: Text(editing ? 'Edit task' : 'New task'),
++      content: TextField(
++        controller: _controller,
++        autofocus: true,
++        textCapitalization: TextCapitalization.sentences,
++        onSubmitted: (_) => _save(),
++        decoration: const InputDecoration(hintText: 'What needs doing today?'),
++      ),
++      actions: [
++        if (editing)
++          TextButton(
++            onPressed: () => Navigator.of(context).pop(const _TaskEdit('', true)),
++            child: const Text('Delete'),
++          ),
++        TextButton(
++          onPressed: () => Navigator.of(context).pop(),
++          child: const Text('Cancel'),
++        ),
++        TextButton(onPressed: _save, child: const Text('Save')),
++      ],
++    );
++  }
++}
++
++class _BlockRow extends StatelessWidget {
++  final int index;
++  final String blockKey;
++  final bool on;
++  final ValueChanged<bool> onChanged;
++  const _BlockRow({
++    super.key,
++    required this.index,
++    required this.blockKey,
++    required this.on,
++    required this.onChanged,
++  });
++
++  @override
++  Widget build(BuildContext context) {
++    final dark = Theme.of(context).brightness == Brightness.dark;
++    var title = blockKey;
++    var hint = '';
++    for (final b in kWidgetBlocks) {
++      if (b.$1 == blockKey) {
++        title = b.$2;
++        hint = b.$3;
++      }
++    }
++    return Padding(
++      padding: const EdgeInsets.symmetric(vertical: 6),
++      child: Row(
++        children: [
++          ReorderableDragStartListener(
++            index: index,
++            child: Padding(
++              padding: const EdgeInsets.only(right: 12, top: 6, bottom: 6),
++              child: Icon(Icons.drag_indicator, color: Surfaces.muted(dark)),
++            ),
++          ),
++          Expanded(
++            child: Column(
++              crossAxisAlignment: CrossAxisAlignment.start,
++              children: [
++                Text(title,
++                    style: body(13.5, Surfaces.bodyText(dark),
++                        weight: FontWeight.w600)),
++                Text(hint, style: body(11, Surfaces.muted(dark))),
++              ],
++            ),
++          ),
++          Switch(
++            value: on,
++            activeTrackColor: Surfaces.accent(dark),
++            onChanged: onChanged,
++          ),
++        ],
++      ),
++    );
++  }
++}
++
++/// An exact copy of what the home-screen widget draws, but live: ticks go
++/// straight to the store and tasks can be edited or added.
+ class _WidgetPreview extends StatelessWidget {
+   final WidgetSnapshot snap;
+-  const _WidgetPreview({required this.snap});
++  final VoidCallback onAddTask;
++  final ValueChanged<WidgetTaskLine> onEditTask;
++  final ValueChanged<WidgetTaskLine> onToggleTask;
++  final ValueChanged<Habit> onToggleHabit;
++  const _WidgetPreview({
++    required this.snap,
++    required this.onAddTask,
++    required this.onEditTask,
++    required this.onToggleTask,
++    required this.onToggleHabit,
++  });
+ 
+   @override
+   Widget build(BuildContext context) {
+@@ -291,8 +495,160 @@ class _WidgetPreview extends StatelessWidget {
+     final text = Color(style.text);
+     final muted = Color(style.muted);
+     final accent = Color(style.accent);
+-    final nothing =
+-        snap.mantra.isEmpty && snap.priority.isEmpty && snap.habits.isEmpty;
++    final doneColor = Color(style.done);
++
++    Widget header(String title, String count) => Padding(
++          padding: const EdgeInsets.only(top: 12, bottom: 2),
++          child: Row(
++            children: [
++              Expanded(
++                child: Text(title,
++                    style: body(10.5, muted, weight: FontWeight.w800)),
++              ),
++              Text(count, style: body(10.5, muted)),
++            ],
++          ),
++        );
++
++    Widget note(String message) => Padding(
++          padding: const EdgeInsets.only(top: 6),
++          child: Text(message, style: body(12, muted)),
++        );
++
++    Widget row({
++      required bool done,
++      required String name,
++      required VoidCallback onTick,
++      VoidCallback? onTap,
++    }) =>
++        Row(
++          children: [
++            InkWell(
++              borderRadius: BorderRadius.circular(16),
++              onTap: onTick,
++              child: Padding(
++                padding: const EdgeInsets.fromLTRB(0, 6, 10, 6),
++                child: Icon(
++                    done ? Icons.check_circle_outline : Icons.radio_button_unchecked,
++                    size: 21,
++                    color: done ? doneColor : accent),
++              ),
++            ),
++            Expanded(
++              child: InkWell(
++                onTap: onTap,
++                child: Padding(
++                  padding: const EdgeInsets.symmetric(vertical: 6),
++                  child: Text(name,
++                      maxLines: 1,
++                      overflow: TextOverflow.ellipsis,
++                      style: body(13.5, done ? doneColor : text)),
++                ),
++              ),
++            ),
++          ],
++        );
++
++    final children = <Widget>[];
++    for (final block in snap.blocks) {
++      switch (block) {
++        case 'stats':
++          if (snap.stats.isNotEmpty) {
++            children.add(Padding(
++              padding: const EdgeInsets.only(top: 10),
++              child: Row(
++                children: [
++                  for (final s in snap.stats)
++                    Expanded(
++                      child: Column(
++                        crossAxisAlignment: CrossAxisAlignment.start,
++                        children: [
++                          Text(s.value,
++                              style: body(19, text, weight: FontWeight.w800)),
++                          Text(s.label, style: body(10.5, muted)),
++                        ],
++                      ),
++                    ),
++                ],
++              ),
++            ));
++          }
++          break;
++        case 'progress':
++          if (snap.total > 0) {
++            children.add(Padding(
++              padding: const EdgeInsets.only(top: 12),
++              child: Column(
++                crossAxisAlignment: CrossAxisAlignment.start,
++                children: [
++                  Text(
++                      snap.done >= snap.total
++                          ? 'Everything done today'
++                          : '${snap.done} of ${snap.total} done today',
++                      style: body(11.5, muted)),
++                  const SizedBox(height: 4),
++                  ClipRRect(
++                    borderRadius: BorderRadius.circular(4),
++                    child: LinearProgressIndicator(
++                      value: (snap.done / snap.total).clamp(0.0, 1.0).toDouble(),
++                      minHeight: 6,
++                      backgroundColor: muted.withValues(alpha: 0.28),
++                      valueColor: AlwaysStoppedAnimation<Color>(accent),
++                    ),
++                  ),
++                ],
++              ),
++            ));
++          }
++          break;
++        case 'tasks':
++          final shownTasks = snap.showDoneTasks
++              ? snap.tasks
++              : snap.tasks.where((t) => !t.task.done).toList();
++          children.add(header('TO-DO',
++              snap.tasks.isEmpty ? '' : '${snap.tasksDone}/${snap.tasks.length}'));
++          if (shownTasks.isEmpty) {
++            children.add(note(snap.tasks.isEmpty
++                ? 'No tasks yet. Tap + to add one.'
++                : 'All done. Nicely done.'));
++          }
++          for (final line in shownTasks) {
++            children.add(row(
++              done: line.task.done,
++              name: line.task.title,
++              onTick: () => onToggleTask(line),
++              onTap: () => onEditTask(line),
++            ));
++          }
++          break;
++        case 'habits':
++          children.add(header('HABITS',
++              snap.habits.isEmpty ? '' : '${snap.habitsDone}/${snap.habits.length}'));
++          if (snap.habits.isEmpty) {
++            children.add(note('No habits selected. Pick some below.'));
++          }
++          for (final line in snap.habits) {
++            children.add(row(
++              done: line.done,
++              name: line.habit.name,
++              onTick: () => onToggleHabit(line.habit),
++            ));
++          }
++          break;
++        case 'mantra':
++          if (snap.mantra.isNotEmpty) {
++            children.add(Padding(
++              padding: const EdgeInsets.only(top: 12),
++              child: Text('“${snap.mantra}”',
++                  maxLines: 2,
++                  overflow: TextOverflow.ellipsis,
++                  style: body(12.5, text).copyWith(fontStyle: FontStyle.italic)),
++            ));
++          }
++          break;
++      }
++    }
++
+     return Container(
+       padding: const EdgeInsets.all(16),
+       decoration: BoxDecoration(
+@@ -313,82 +669,32 @@ class _WidgetPreview extends StatelessWidget {
+           Row(
+             children: [
+               Expanded(
+-                child: Text('Prakriyā',
+-                    style: body(15, Color(style.title), weight: FontWeight.w800)),
+-              ),
+-              if (snap.showStreak && snap.streak > 0)
+-                Text('🔥 ${snap.streak}',
+-                    style: body(12.5, accent, weight: FontWeight.w800)),
+-            ],
+-          ),
+-          Text(snap.dateLabel, style: body(10.5, muted)),
+-          if (snap.showProgress && snap.total > 0) ...[
+-            const SizedBox(height: 10),
+-            Text(
+-                snap.done >= snap.total
+-                    ? 'All ${snap.total} habits done today ✓'
+-                    : '${snap.done} of ${snap.total} habits done',
+-                style: body(11.5, muted)),
+-            const SizedBox(height: 4),
+-            ClipRRect(
+-              borderRadius: BorderRadius.circular(4),
+-              child: LinearProgressIndicator(
+-                value: (snap.done / snap.total).clamp(0.0, 1.0).toDouble(),
+-                minHeight: 6,
+-                backgroundColor: muted.withValues(alpha: 0.28),
+-                valueColor: AlwaysStoppedAnimation<Color>(accent),
+-              ),
+-            ),
+-          ],
+-          if (snap.priority.isNotEmpty) ...[
+-            const SizedBox(height: 10),
+-            Text('▸ ${snap.priority}',
+-                maxLines: 1,
+-                overflow: TextOverflow.ellipsis,
+-                style: body(12.5, text, weight: FontWeight.w700)),
+-          ],
+-          if (snap.habits.isNotEmpty) const SizedBox(height: 6),
+-          for (final line in snap.habits)
+-            InkWell(
+-              borderRadius: BorderRadius.circular(6),
+-              onTap: () => store.toggleHabit(line.habit),
+-              child: Padding(
+-                padding: const EdgeInsets.symmetric(vertical: 4),
+-                child: Row(
++                child: Column(
++                  crossAxisAlignment: CrossAxisAlignment.start,
+                   children: [
+-                    Icon(
+-                        line.done
+-                            ? Icons.check_circle
+-                            : Icons.radio_button_unchecked,
+-                        size: 16,
+-                        color: line.done ? Color(style.done) : accent),
+-                    const SizedBox(width: 8),
+-                    Expanded(
+-                      child: Text(line.habit.name,
+-                          maxLines: 1,
+-                          overflow: TextOverflow.ellipsis,
+-                          style: body(12.5, line.done ? Color(style.done) : text)
+-                              .copyWith(
+-                                  decoration: line.done
+-                                      ? TextDecoration.lineThrough
+-                                      : TextDecoration.none)),
+-                    ),
++                    Text('Prakriyā',
++                        style: body(15, Color(style.title), weight: FontWeight.w800)),
++                    Text(snap.dateLabel, style: body(10.5, muted)),
+                   ],
+                 ),
+               ),
++              InkWell(
++                borderRadius: BorderRadius.circular(20),
++                onTap: onAddTask,
++                child: Padding(
++                  padding: const EdgeInsets.all(6),
++                  child: Icon(Icons.add, color: accent, size: 26),
++                ),
++              ),
++            ],
++          ),
++          ...children,
++          if (children.isEmpty)
++            Padding(
++              padding: const EdgeInsets.only(top: 12),
++              child: Text('Switch a block on below to fill your widget.',
++                  style: body(12, muted)),
+             ),
+-          if (snap.mantra.isNotEmpty) ...[
+-            const SizedBox(height: 8),
+-            Text('“${snap.mantra}”',
+-                maxLines: 2,
+-                overflow: TextOverflow.ellipsis,
+-                style: body(12, text).copyWith(fontStyle: FontStyle.italic)),
+-          ],
+-          if (nothing) ...[
+-            const SizedBox(height: 10),
+-            Text('Open Prakriyā to set up your day.',
+-                style: body(11.5, muted)),
+-          ],
+         ],
+       ),
+     );
+@@ -451,32 +757,6 @@ class _StyleSwatch extends StatelessWidget {
+   }
+ }
+ 
+-class _ToggleRow extends StatelessWidget {
+-  final String label;
+-  final bool value;
+-  final ValueChanged<bool> onChanged;
+-  const _ToggleRow(
+-      {required this.label, required this.value, required this.onChanged});
+-
+-  @override
+-  Widget build(BuildContext context) {
+-    final dark = Theme.of(context).brightness == Brightness.dark;
+-    return Row(
+-      children: [
+-        Expanded(
+-          child: Text(label,
+-              style: body(13.5, Surfaces.bodyText(dark), weight: FontWeight.w500)),
+-        ),
+-        Switch(
+-          value: value,
+-          activeTrackColor: Surfaces.accent(dark),
+-          onChanged: onChanged,
+-        ),
+-      ],
+-    );
+-  }
+-}
+-
+ class _HabitChip extends StatelessWidget {
+   final String name;
+   final bool selected;
+diff --git a/lib/services/extras.dart b/lib/services/extras.dart
+index cc1d4ec..d95657e 100644
+--- a/lib/services/extras.dart
++++ b/lib/services/extras.dart
+@@ -48,10 +48,23 @@ class Extras extends ChangeNotifier {
+   int meditationInterval = 0;
+   String breathPattern = 'calm';
+ 
+-  /// Home-screen widget look and extras: style key, progress bar, streak.
++  /// Home-screen widget: look, the order of its blocks, which blocks are
++  /// switched off, which dashboard stats it shows, and whether ticked tasks
++  /// stay in the list.
+   String widgetStyle = 'dusk';
+-  bool widgetShowProgress = true;
+-  bool widgetShowStreak = true;
++  List<String> widgetOrder = <String>[
++    'stats',
++    'progress',
++    'tasks',
++    'habits',
++    'mantra',
++  ];
++  List<String> widgetOff = <String>[];
++  List<String> widgetStats = <String>['habits', 'tasks', 'streak'];
++  bool widgetShowDoneTasks = true;
++
++  /// False until the old per-section switches were copied across once.
++  bool widgetBlocksSeeded = false;
+ 
+   bool checklistDismissed = false;
+ 
+@@ -117,12 +130,16 @@ class Extras extends ChangeNotifier {
+           if (decoded['widgetStyle'] is String) {
+             widgetStyle = decoded['widgetStyle'] as String;
+           }
+-          if (decoded['widgetShowProgress'] is bool) {
+-            widgetShowProgress = decoded['widgetShowProgress'] as bool;
+-          }
+-          if (decoded['widgetShowStreak'] is bool) {
+-            widgetShowStreak = decoded['widgetShowStreak'] as bool;
++          final order = _readStringList(decoded['widgetOrder']);
++          if (order != null) widgetOrder = _completeOrder(order);
++          final off = _readStringList(decoded['widgetOff']);
++          if (off != null) widgetOff = off;
++          final stats = _readStringList(decoded['widgetStats']);
++          if (stats != null) widgetStats = stats.take(4).toList();
++          if (decoded['widgetShowDoneTasks'] is bool) {
++            widgetShowDoneTasks = decoded['widgetShowDoneTasks'] as bool;
+           }
++          widgetBlocksSeeded = decoded['widgetBlocksSeeded'] == true;
+           checklistDismissed = decoded['checklistDismissed'] == true;
+           recapDismissedWeek = decoded['recapDismissedWeek'] is String
+               ? decoded['recapDismissedWeek'] as String
+@@ -138,6 +155,22 @@ class Extras extends ChangeNotifier {
+     notifyListeners();
+   }
+ 
++  static List<String>? _readStringList(dynamic source) {
++    if (source is! List) return null;
++    return <String>[for (final e in source) '$e'];
++  }
++
++  /// A saved order that predates a block (or lost one) still lists every
++  /// block exactly once.
++  static List<String> _completeOrder(List<String> saved) {
++    const all = ['stats', 'progress', 'tasks', 'habits', 'mantra'];
++    final out = <String>[for (final k in saved) if (all.contains(k)) k];
++    for (final k in all) {
++      if (!out.contains(k)) out.add(k);
++    }
++    return out.toSet().toList();
++  }
++
+   static void _readIntMap(dynamic source, Map<String, int> into) {
+     into.clear();
+     if (source is Map) {
+@@ -182,8 +215,11 @@ class Extras extends ChangeNotifier {
+           'meditationInterval': meditationInterval,
+           'breathPattern': breathPattern,
+           'widgetStyle': widgetStyle,
+-          'widgetShowProgress': widgetShowProgress,
+-          'widgetShowStreak': widgetShowStreak,
++          'widgetOrder': widgetOrder,
++          'widgetOff': widgetOff,
++          'widgetStats': widgetStats,
++          'widgetShowDoneTasks': widgetShowDoneTasks,
++          'widgetBlocksSeeded': widgetBlocksSeeded,
+           'checklistDismissed': checklistDismissed,
+           'recapDismissedWeek': recapDismissedWeek,
+           'carriedOverOn': carriedOverOn,
+@@ -264,10 +300,42 @@ class Extras extends ChangeNotifier {
+ 
+   // ---- Home screen widget ----
+ 
+-  void setWidgetLook({String? style, bool? progress, bool? streak}) {
+-    if (style != null) widgetStyle = style;
+-    if (progress != null) widgetShowProgress = progress;
+-    if (streak != null) widgetShowStreak = streak;
++  bool widgetBlockOn(String key) => !widgetOff.contains(key);
++
++  void setWidgetStyle(String style) {
++    widgetStyle = style;
++    _changed();
++  }
++
++  void setWidgetBlockOn(String key, bool on) {
++    widgetOff.remove(key);
++    if (!on) widgetOff.add(key);
++    widgetBlocksSeeded = true;
++    _changed();
++  }
++
++  void setWidgetOrder(List<String> order) {
++    widgetOrder = _completeOrder(order);
++    widgetBlocksSeeded = true;
++    _changed();
++  }
++
++  /// Which dashboard stats show (at most four, in the order given).
++  void setWidgetStats(List<String> stats) {
++    widgetStats = stats.take(4).toList();
++    _changed();
++  }
++
++  void setWidgetShowDoneTasks(bool value) {
++    widgetShowDoneTasks = value;
++    _changed();
++  }
++
++  /// One-time copy of the older per-section switches into the block list.
++  void seedWidgetBlocks({required List<String> off}) {
++    if (widgetBlocksSeeded) return;
++    widgetOff = List<String>.from(off);
++    widgetBlocksSeeded = true;
+     _changed();
+   }
+ 
+diff --git a/lib/services/home_widget_service.dart b/lib/services/home_widget_service.dart
+index cdf68c5..3bf9527 100644
+--- a/lib/services/home_widget_service.dart
++++ b/lib/services/home_widget_service.dart
+@@ -95,38 +95,82 @@ class WidgetHabitLine {
+   const WidgetHabitLine(this.habit, this.done);
+ }
+ 
+-/// Everything the widget shows right now, computed once so the in-app preview
+-/// and the native widget can never disagree.
++/// One of today's tasks, with its position in the store's list (needed to
++/// tick, edit or delete it).
++class WidgetTaskLine {
++  final int index;
++  final Task task;
++  const WidgetTaskLine(this.index, this.task);
++}
++
++class WidgetStat {
++  final String key;
++  final String label;
++  final String value;
++  const WidgetStat(this.key, this.label, this.value);
++}
++
++/// Blocks the widget can show, in their default order.
++const List<(String key, String label, String hint)> kWidgetBlocks = [
++  ('stats', 'Dashboard stats', 'Up to four numbers at a glance'),
++  ('progress', 'Progress bar', "How much of today is done"),
++  ('tasks', 'To-do list', 'Today\'s tasks, tick them right on the widget'),
++  ('habits', 'Habit checklist', 'Tick habits right on the widget'),
++  ('mantra', 'Daily mantra', "Today's line to carry"),
++];
++
++/// Stats the dashboard block can show.
++const List<(String key, String label)> kWidgetStatOptions = [
++  ('habits', 'Habits'),
++  ('tasks', 'Tasks'),
++  ('streak', 'Day streak'),
++  ('focus', 'Focus'),
++  ('meditate', 'Meditated'),
++  ('water', 'Water'),
++];
++
++/// Everything the widget shows right now, computed once so the in-app
++/// preview and the native widget never disagree.
+ class WidgetSnapshot {
+   final String style;
+   final String dateLabel;
+   final String mantra;
+-  final String priority;
+-  final List<WidgetHabitLine> habits;
+-  final int done;
+-  final int total;
+   final int streak;
+-  final bool showProgress;
+-  final bool showStreak;
++  final List<String> blocks;
++  final List<WidgetStat> stats;
++  final List<WidgetHabitLine> habits;
++  final List<WidgetTaskLine> tasks;
++  final bool showDoneTasks;
+   const WidgetSnapshot({
+     required this.style,
+     required this.dateLabel,
+     required this.mantra,
+-    required this.priority,
+-    required this.habits,
+-    required this.done,
+-    required this.total,
+     required this.streak,
+-    required this.showProgress,
+-    required this.showStreak,
++    required this.blocks,
++    required this.stats,
++    required this.habits,
++    required this.tasks,
++    required this.showDoneTasks,
+   });
++
++  int get habitsDone => habits.where((h) => h.done).length;
++  int get tasksDone => tasks.where((t) => t.task.done).length;
++  int get total => habits.length + tasks.length;
++  int get done => habitsDone + tasksDone;
+ }
+ 
+-/// Keeps the Android home-screen widget's data in sync with the app.
++/// Keeps the Android home-screen widget in sync with the app, in both
++/// directions.
++///
++/// App to widget: the look, the blocks to show and today's lists are written
++/// as text into shared preferences and the widget is told to redraw.
++/// Widget to app: ticking a task or habit on the widget redraws it at once
++/// and queues the change under `widget_pending`; [syncFromWidget] applies
++/// that queue to the store the next time the app runs. Taps on titles open
++/// the app, which reports them through [pendingOpen].
+ ///
+-/// The native provider and layouts live in `android_overrides/widget/` and are
+-/// copied into the generated Android project by CI. Everything is passed to it
+-/// as text through shared preferences.
++/// The native provider and layouts live in `android_overrides/widget/` and
++/// are copied into the generated Android project by CI.
+ class HomeWidgetService {
+   HomeWidgetService._();
+   static final instance = HomeWidgetService._();
+@@ -134,8 +178,14 @@ class HomeWidgetService {
+   static const _androidWidgetName = 'HabitsWidgetProvider';
+   static const _qualifiedName = 'ai.aandccreative.prakriya.HabitsWidgetProvider';
+ 
++  /// A screen the widget asked to open ('tasks', 'addtask', 'dashboard').
++  /// The home screen consumes it, so a PIN lock is never bypassed.
++  final ValueNotifier<String?> pendingOpen = ValueNotifier<String?>(null);
++
+   bool _wired = false;
+   Timer? _debounce;
++  bool _pushing = false;
++  bool _again = false;
+ 
+   /// Starts listening and pushing widget data on every change. Safe to call
+   /// more than once.
+@@ -144,9 +194,25 @@ class HomeWidgetService {
+     _wired = true;
+     store.addListener(_schedule);
+     extras.addListener(_schedule);
++    try {
++      HomeWidget.widgetClicked.listen(_handleUri, onError: (Object _) {});
++      HomeWidget.initiallyLaunchedFromHomeWidget()
++          .then(_handleUri)
++          .catchError((Object _) {});
++    } catch (_) {
++      // No widget plugin on this platform.
++    }
+     _schedule();
+   }
+ 
++  void _handleUri(Uri? uri) {
++    if (uri == null || uri.scheme != 'prakriya' || uri.host != 'widget') return;
++    final segments = uri.pathSegments;
++    if (segments.length >= 2 && segments.first == 'open') {
++      pendingOpen.value = segments[1];
++    }
++  }
++
+   void _schedule() {
+     _debounce?.cancel();
+     _debounce = Timer(const Duration(milliseconds: 350), () {
+@@ -157,41 +223,71 @@ class HomeWidgetService {
+   /// Manual "update now".
+   Future<void> forceRefresh() => _push();
+ 
++  // ---- Snapshot ----
++
+   /// What the widget shows right now.
+   WidgetSnapshot snapshot() {
+     final today = DateTime.now();
++
+     final habitLines = <WidgetHabitLine>[];
+-    var done = 0;
+-    var total = 0;
+-    if (store.widgetShowHabits) {
+-      final selected =
+-          store.habits.where((h) => store.widgetHabitSelected(h.id)).toList();
+-      total = selected.length;
+-      for (final h in selected) {
+-        final isDone = h.isDoneOn(today);
+-        if (isDone) done++;
+-      }
+-      for (final h in selected.take(5)) {
++    for (final h in store.habits) {
++      if (store.widgetHabitSelected(h.id)) {
+         habitLines.add(WidgetHabitLine(h, h.isDoneOn(today)));
+       }
+     }
+-    var priority = '';
+-    if (store.widgetShowPriorities) {
+-      final open = store.todaysTasks.where((t) => !t.done).toList();
+-      if (open.isNotEmpty) priority = open.first.title;
++
++    // Open tasks first, finished ones after; each keeps its store position.
++    final all = store.todaysTasks;
++    final open = <WidgetTaskLine>[];
++    final finished = <WidgetTaskLine>[];
++    for (var i = 0; i < all.length; i++) {
++      (all[i].done ? finished : open).add(WidgetTaskLine(i, all[i]));
++    }
++    final taskLines = <WidgetTaskLine>[...open, ...finished];
++
++    final streak = _overallStreak();
++    final stats = <WidgetStat>[];
++    for (final key in extras.widgetStats) {
++      switch (key) {
++        case 'habits':
++          final habitsDone = habitLines.where((h) => h.done).length;
++          stats.add(WidgetStat('habits', 'Habits',
++              habitLines.isEmpty ? '–' : '$habitsDone/${habitLines.length}'));
++          break;
++        case 'tasks':
++          final tasksDone = taskLines.where((t) => t.task.done).length;
++          stats.add(WidgetStat('tasks', 'Tasks',
++              taskLines.isEmpty ? '–' : '$tasksDone/${taskLines.length}'));
++          break;
++        case 'streak':
++          stats.add(WidgetStat('streak', 'Day streak', '$streak'));
++          break;
++        case 'focus':
++          stats.add(WidgetStat('focus', 'Focus', '${extras.focusMinutesOn(today)}m'));
++          break;
++        case 'meditate':
++          stats.add(WidgetStat(
++              'meditate', 'Meditated', '${extras.meditationMinutesOn(today)}m'));
++          break;
++        case 'water':
++          stats.add(WidgetStat('water', 'Water', '${extras.waterOn(today)}'));
++          break;
++      }
+     }
+-    final mantra = store.widgetShowMantra ? store.mantraOfTheDay : '';
++
+     return WidgetSnapshot(
+       style: extras.widgetStyle,
+       dateLabel: _dateLabel(today),
+-      mantra: mantra,
+-      priority: priority,
++      mantra: store.mantraOfTheDay,
++      streak: streak,
++      blocks: <String>[
++        for (final k in extras.widgetOrder)
++          if (extras.widgetBlockOn(k)) k,
++      ],
++      stats: stats,
+       habits: habitLines,
+-      done: done,
+-      total: total,
+-      streak: _overallStreak(),
+-      showProgress: extras.widgetShowProgress,
+-      showStreak: extras.widgetShowStreak,
++      tasks: taskLines,
++      showDoneTasks: extras.widgetShowDoneTasks,
+     );
+   }
+ 
+@@ -221,6 +317,8 @@ class HomeWidgetService {
+     return count;
+   }
+ 
++  // ---- Pinning ----
++
+   /// Whether this phone's launcher can show the "add widget" prompt.
+   Future<bool> canPin() async {
+     try {
+@@ -242,25 +340,121 @@ class HomeWidgetService {
+     }
+   }
+ 
++  // ---- Widget to app ----
++
++  /// Applies ticks made on the home-screen widget to the store. Safe to call
++  /// at any time; does nothing when nothing is queued.
++  Future<void> syncFromWidget() async {
++    try {
++      final raw = await HomeWidget.getWidgetData<String>('widget_pending',
++          defaultValue: '[]');
++      if (raw == null || raw.isEmpty || raw == '[]') return;
++      await HomeWidget.saveWidgetData<String>('widget_pending', '[]');
++      final decoded = jsonDecode(raw);
++      if (decoded is! List) return;
++      final todayKey = dayKey(DateTime.now());
++      final now = DateTime.now();
++      for (final entry in decoded) {
++        if (entry is! Map) continue;
++        final day = entry['day'];
++        if (day is String && day.isNotEmpty && day != todayKey) continue;
++        final kind = entry['k'];
++        final key = entry['key'];
++        final want = entry['v'] == true;
++        if (key is! String) continue;
++        if (kind == 'habit') {
++          for (final h in store.habits) {
++            if (h.id == key) {
++              if (h.isDoneOn(now) != want) await store.toggleHabit(h);
++              break;
++            }
++          }
++        } else if (kind == 'task') {
++          final tasks = store.todaysTasks;
++          final hint = entry['i'];
++          var index = -1;
++          if (hint is int &&
++              hint >= 0 &&
++              hint < tasks.length &&
++              tasks[hint].title == key) {
++            index = hint;
++          } else {
++            for (var i = 0; i < tasks.length; i++) {
++              if (tasks[i].title == key && tasks[i].done != want) {
++                index = i;
++                break;
++              }
++            }
++          }
++          if (index >= 0 && tasks[index].done != want) {
++            await store.toggleTask(index);
++          }
++        }
++      }
++    } catch (e) {
++      debugPrint('syncFromWidget failed: $e');
++    }
++  }
++
++  // ---- App to widget ----
++
+   Future<void> _push() async {
++    if (_pushing) {
++      _again = true;
++      return;
++    }
++    _pushing = true;
+     try {
++      do {
++        _again = false;
++        await _pushOnce();
++      } while (_again);
++    } finally {
++      _pushing = false;
++    }
++  }
++
++  Future<void> _pushOnce() async {
++    try {
++      // Ticks made on the widget come first, so the data we write back
++      // already includes them.
++      await syncFromWidget();
++
++      // One-time: carry the older per-section switches into the block list.
++      if (!extras.widgetBlocksSeeded) {
++        extras.seedWidgetBlocks(off: <String>[
++          if (!store.widgetShowHabits) 'habits',
++          if (!store.widgetShowPriorities) 'tasks',
++          if (!store.widgetShowMantra) 'mantra',
++        ]);
++      }
++
+       final snap = snapshot();
++      final tasksJson = jsonEncode([
++        for (final t in snap.tasks)
++          {'i': t.index, 't': t.task.title, 'd': t.task.done},
++      ]);
+       final habitsJson = jsonEncode([
+-        for (final line in snap.habits)
+-          {'name': line.habit.name, 'done': line.done},
++        for (final h in snap.habits)
++          {'id': h.habit.id, 'n': h.habit.name, 'd': h.done},
++      ]);
++      final statsJson = jsonEncode([
++        for (final s in snap.stats) {'k': s.key, 'l': s.label, 'v': s.value},
+       ]);
+-      await HomeWidget.saveWidgetData<String>('widget_habits', habitsJson);
+-      await HomeWidget.saveWidgetData<String>('widget_top_priority', snap.priority);
+-      await HomeWidget.saveWidgetData<String>('widget_mantra', snap.mantra);
+-      await HomeWidget.saveWidgetData<String>('widget_style', snap.style);
+-      await HomeWidget.saveWidgetData<String>('widget_date', snap.dateLabel);
+-      await HomeWidget.saveWidgetData<String>('widget_done', '${snap.done}');
+-      await HomeWidget.saveWidgetData<String>('widget_total', '${snap.total}');
+-      await HomeWidget.saveWidgetData<String>('widget_streak', '${snap.streak}');
+-      await HomeWidget.saveWidgetData<String>(
+-          'widget_show_progress', snap.showProgress ? '1' : '0');
+-      await HomeWidget.saveWidgetData<String>(
+-          'widget_show_streak', snap.showStreak ? '1' : '0');
++
++      Future<void> put(String key, String value) async {
++        await HomeWidget.saveWidgetData<String>(key, value);
++      }
++
++      await put('widget_style', snap.style);
++      await put('widget_date', snap.dateLabel);
++      await put('widget_day', dayKey(DateTime.now()));
++      await put('widget_blocks', jsonEncode(snap.blocks));
++      await put('widget_stats', statsJson);
++      await put('widget_tasks', tasksJson);
++      await put('widget_habits', habitsJson);
++      await put('widget_mantra', snap.mantra);
++      await put('widget_show_done_tasks', snap.showDoneTasks ? '1' : '0');
+       await HomeWidget.updateWidget(androidName: _androidWidgetName);
+     } catch (_) {
+       // No widget added yet, or a platform without the native provider.
+diff --git a/lib/store.dart b/lib/store.dart
+index ea5384d..96f9592 100644
+--- a/lib/store.dart
++++ b/lib/store.dart
+@@ -208,6 +208,16 @@ class Store extends ChangeNotifier {
+     await _commit();
+   }
+ 
++  /// Changes a task's title (for today's list).
++  Future<void> renameTask(int index, String title) async {
++    final trimmed = title.trim();
++    if (trimmed.isEmpty) return;
++    final list = _state.tasksByDay[dayKey(DateTime.now())];
++    if (list == null || index < 0 || index >= list.length) return;
++    list[index].title = trimmed;
++    await _commit();
++  }
++
+   Future<void> removeTask(int index) async {
+     final list = _state.tasksByDay[dayKey(DateTime.now())];
+     if (list == null || index < 0 || index >= list.length) return;
