@@ -208,6 +208,16 @@ class Store extends ChangeNotifier {
     await _commit();
   }
 
+  /// Sets a task's done state on any day's list (used when ticks made on the
+  /// home-screen widget are applied after midnight).
+  Future<void> setTaskDoneOn(DateTime date, int index, bool done) async {
+    final list = _state.tasksByDay[dayKey(date)];
+    if (list == null || index < 0 || index >= list.length) return;
+    if (list[index].done == done) return;
+    list[index].done = done;
+    await _commit();
+  }
+
   /// Changes a task's title (for today's list).
   Future<void> renameTask(int index, String title) async {
     final trimmed = title.trim();

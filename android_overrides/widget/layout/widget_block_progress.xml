@@ -2,7 +2,7 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_marginTop="6dp"
+    android:layout_marginTop="8dp"
     android:orientation="vertical">
 
     <TextView
@@ -10,50 +10,105 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:maxLines="1"
-        android:textColor="#A99BD0"
-        android:textSize="11sp" />
+        android:textColor="#B4A8DA"
+        android:textSize="12sp" />
 
-    <ProgressBar
-        android:id="@+id/progress_dusk"
-        style="?android:attr/progressBarStyleHorizontal"
+    <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="6dp"
-        android:layout_marginTop="4dp"
-        android:max="100"
-        android:progress="0"
-        android:progressDrawable="@drawable/widget_progress_dusk" />
-
-    <ProgressBar
-        android:id="@+id/progress_sunrise"
-        style="?android:attr/progressBarStyleHorizontal"
-        android:layout_width="match_parent"
-        android:layout_height="6dp"
-        android:layout_marginTop="4dp"
-        android:max="100"
-        android:progress="0"
-        android:progressDrawable="@drawable/widget_progress_sunrise"
-        android:visibility="gone" />
-
-    <ProgressBar
-        android:id="@+id/progress_forest"
-        style="?android:attr/progressBarStyleHorizontal"
-        android:layout_width="match_parent"
-        android:layout_height="6dp"
-        android:layout_marginTop="4dp"
-        android:max="100"
-        android:progress="0"
-        android:progressDrawable="@drawable/widget_progress_forest"
-        android:visibility="gone" />
-
-    <ProgressBar
-        android:id="@+id/progress_paper"
-        style="?android:attr/progressBarStyleHorizontal"
-        android:layout_width="match_parent"
-        android:layout_height="6dp"
-        android:layout_marginTop="4dp"
-        android:max="100"
-        android:progress="0"
-        android:progressDrawable="@drawable/widget_progress_paper"
-        android:visibility="gone" />
-
+        android:layout_height="wrap_content"
+        android:layout_marginTop="5dp"
+        android:layout_marginStart="-1.5dp"
+        android:layout_marginEnd="-1.5dp"
+        android:orientation="horizontal">
+        <ImageView
+            android:id="@+id/seg1"
+            android:layout_width="0dp"
+            android:layout_height="7dp"
+            android:layout_marginStart="1.5dp"
+            android:layout_marginEnd="1.5dp"
+            android:layout_weight="1"
+            android:scaleType="fitXY"
+            android:src="@drawable/widget_seg" />
+        <ImageView
+            android:id="@+id/seg2"
+            android:layout_width="0dp"
+            android:layout_height="7dp"
+            android:layout_marginStart="1.5dp"
+            android:layout_marginEnd="1.5dp"
+            android:layout_weight="1"
+            android:scaleType="fitXY"
+            android:src="@drawable/widget_seg" />
+        <ImageView
+            android:id="@+id/seg3"
+            android:layout_width="0dp"
+            android:layout_height="7dp"
+            android:layout_marginStart="1.5dp"
+            android:layout_marginEnd="1.5dp"
+            android:layout_weight="1"
+            android:scaleType="fitXY"
+            android:src="@drawable/widget_seg" />
+        <ImageView
+            android:id="@+id/seg4"
+            android:layout_width="0dp"
+            android:layout_height="7dp"
+            android:layout_marginStart="1.5dp"
+            android:layout_marginEnd="1.5dp"
+            android:layout_weight="1"
+            android:scaleType="fitXY"
+            android:src="@drawable/widget_seg" />
+        <ImageView
+            android:id="@+id/seg5"
+            android:layout_width="0dp"
+            android:layout_height="7dp"
+            android:layout_marginStart="1.5dp"
+            android:layout_marginEnd="1.5dp"
+            android:layout_weight="1"
+            android:scaleType="fitXY"
+            android:src="@drawable/widget_seg" />
+        <ImageView
+            android:id="@+id/seg6"
+            android:layout_width="0dp"
+            android:layout_height="7dp"
+            android:layout_marginStart="1.5dp"
+            android:layout_marginEnd="1.5dp"
+            android:layout_weight="1"
+            android:scaleType="fitXY"
+            android:src="@drawable/widget_seg" />
+        <ImageView
+            android:id="@+id/seg7"
+            android:layout_width="0dp"
+            android:layout_height="7dp"
+            android:layout_marginStart="1.5dp"
+            android:layout_marginEnd="1.5dp"
+            android:layout_weight="1"
+            android:scaleType="fitXY"
+            android:src="@drawable/widget_seg" />
+        <ImageView
+            android:id="@+id/seg8"
+            android:layout_width="0dp"
+            android:layout_height="7dp"
+            android:layout_marginStart="1.5dp"
+            android:layout_marginEnd="1.5dp"
+            android:layout_weight="1"
+            android:scaleType="fitXY"
+            android:src="@drawable/widget_seg" />
+        <ImageView
+            android:id="@+id/seg9"
+            android:layout_width="0dp"
+            android:layout_height="7dp"
+            android:layout_marginStart="1.5dp"
+            android:layout_marginEnd="1.5dp"
+            android:layout_weight="1"
+            android:scaleType="fitXY"
+            android:src="@drawable/widget_seg" />
+        <ImageView
+            android:id="@+id/seg10"
+            android:layout_width="0dp"
+            android:layout_height="7dp"
+            android:layout_marginStart="1.5dp"
+            android:layout_marginEnd="1.5dp"
+            android:layout_weight="1"
+            android:scaleType="fitXY"
+            android:src="@drawable/widget_seg" />
+    </LinearLayout>
 </LinearLayout>

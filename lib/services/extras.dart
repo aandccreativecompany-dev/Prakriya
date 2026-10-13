@@ -13,6 +13,17 @@ import '../models.dart' show dayKey;
 /// in SharedPreferences, so adding or changing it can never corrupt or reset
 /// the user's existing saved data. Changes notify listeners immediately and
 /// the disk write happens in the background.
+/// Every block the home-screen widget can show, in default order.
+const List<String> kWidgetBlockKeys = [
+  'stats',
+  'progress',
+  'tasks',
+  'habits',
+  'water',
+  'week',
+  'mantra',
+];
+
 class Extras extends ChangeNotifier {
   static const _key = 'prakriya_extras_v1';
 
@@ -48,20 +59,23 @@ class Extras extends ChangeNotifier {
   int meditationInterval = 0;
   String breathPattern = 'calm';
 
-  /// Home-screen widget: look, the order of its blocks, which blocks are
-  /// switched off, which dashboard stats it shows, and whether ticked tasks
-  /// stay in the list.
+  /// Home-screen widget settings. Look: style, accent ('' = the style's own),
+  /// background opacity (percent), text size and row density. Content: block
+  /// order and which are off, dashboard stats, header, list behaviour, water.
   String widgetStyle = 'dusk';
-  List<String> widgetOrder = <String>[
-    'stats',
-    'progress',
-    'tasks',
-    'habits',
-    'mantra',
-  ];
-  List<String> widgetOff = <String>[];
+  String widgetAccent = '';
+  int widgetOpacity = 100;
+  String widgetTextSize = 'medium';
+  bool widgetCompact = false;
+  List<String> widgetOrder = <String>[...kWidgetBlockKeys];
+  List<String> widgetOff = <String>['water', 'week'];
   List<String> widgetStats = <String>['habits', 'tasks', 'streak'];
   bool widgetShowDoneTasks = true;
+  String widgetTitleMode = 'app';
+  bool widgetShowDate = true;
+  String widgetRowTap = 'open';
+  int widgetMaxRows = 0;
+  int widgetWaterGoal = 8;
 
   /// False until the old per-section switches were copied across once.
   bool widgetBlocksSeeded = false;
@@ -131,13 +145,46 @@ class Extras extends ChangeNotifier {
             widgetStyle = decoded['widgetStyle'] as String;
           }
           final order = _readStringList(decoded['widgetOrder']);
-          if (order != null) widgetOrder = _completeOrder(order);
           final off = _readStringList(decoded['widgetOff']);
           if (off != null) widgetOff = off;
+          if (order != null) {
+            // Blocks added in later versions start switched off for people
+            // who already had a saved layout.
+            for (final k in kWidgetBlockKeys) {
+              if (!order.contains(k) && !widgetOff.contains(k)) widgetOff.add(k);
+            }
+            widgetOrder = _completeOrder(order);
+          }
           final stats = _readStringList(decoded['widgetStats']);
           if (stats != null) widgetStats = stats.take(4).toList();
           if (decoded['widgetShowDoneTasks'] is bool) {
             widgetShowDoneTasks = decoded['widgetShowDoneTasks'] as bool;
+          }
+          if (decoded['widgetAccent'] is String) {
+            widgetAccent = decoded['widgetAccent'] as String;
+          }
+          final opacity = decoded['widgetOpacity'];
+          if (opacity is num) {
+            widgetOpacity = opacity.toInt().clamp(30, 100).toInt();
+          }
+          if (decoded['widgetTextSize'] is String) {
+            widgetTextSize = decoded['widgetTextSize'] as String;
+          }
+          widgetCompact = decoded['widgetCompact'] == true;
+          if (decoded['widgetTitleMode'] is String) {
+            widgetTitleMode = decoded['widgetTitleMode'] as String;
+          }
+          if (decoded['widgetShowDate'] is bool) {
+            widgetShowDate = decoded['widgetShowDate'] as bool;
+          }
+          if (decoded['widgetRowTap'] is String) {
+            widgetRowTap = decoded['widgetRowTap'] as String;
+          }
+          final maxRows = decoded['widgetMaxRows'];
+          if (maxRows is num) widgetMaxRows = maxRows.toInt().clamp(0, 20).toInt();
+          final waterGoal = decoded['widgetWaterGoal'];
+          if (waterGoal is num) {
+            widgetWaterGoal = waterGoal.toInt().clamp(1, 30).toInt();
           }
           widgetBlocksSeeded = decoded['widgetBlocksSeeded'] == true;
           checklistDismissed = decoded['checklistDismissed'] == true;
@@ -163,9 +210,8 @@ class Extras extends ChangeNotifier {
   /// A saved order that predates a block (or lost one) still lists every
   /// block exactly once.
   static List<String> _completeOrder(List<String> saved) {
-    const all = ['stats', 'progress', 'tasks', 'habits', 'mantra'];
-    final out = <String>[for (final k in saved) if (all.contains(k)) k];
-    for (final k in all) {
+    final out = <String>[for (final k in saved) if (kWidgetBlockKeys.contains(k)) k];
+    for (final k in kWidgetBlockKeys) {
       if (!out.contains(k)) out.add(k);
     }
     return out.toSet().toList();
@@ -215,6 +261,15 @@ class Extras extends ChangeNotifier {
           'meditationInterval': meditationInterval,
           'breathPattern': breathPattern,
           'widgetStyle': widgetStyle,
+          'widgetAccent': widgetAccent,
+          'widgetOpacity': widgetOpacity,
+          'widgetTextSize': widgetTextSize,
+          'widgetCompact': widgetCompact,
+          'widgetTitleMode': widgetTitleMode,
+          'widgetShowDate': widgetShowDate,
+          'widgetRowTap': widgetRowTap,
+          'widgetMaxRows': widgetMaxRows,
+          'widgetWaterGoal': widgetWaterGoal,
           'widgetOrder': widgetOrder,
           'widgetOff': widgetOff,
           'widgetStats': widgetStats,
@@ -307,6 +362,49 @@ class Extras extends ChangeNotifier {
     _changed();
   }
 
+  /// Look settings; pass only what changes.
+  void setWidgetLook({
+    String? accent,
+    int? opacity,
+    String? textSize,
+    bool? compact,
+  }) {
+    if (accent != null) widgetAccent = accent;
+    if (opacity != null) widgetOpacity = opacity.clamp(30, 100).toInt();
+    if (textSize != null) widgetTextSize = textSize;
+    if (compact != null) widgetCompact = compact;
+    _changed();
+  }
+
+  /// Content settings; pass only what changes.
+  void setWidgetContent({
+    String? titleMode,
+    bool? showDate,
+    String? rowTap,
+    int? maxRows,
+    int? waterGoal,
+  }) {
+    if (titleMode != null) widgetTitleMode = titleMode;
+    if (showDate != null) widgetShowDate = showDate;
+    if (rowTap != null) widgetRowTap = rowTap;
+    if (maxRows != null) widgetMaxRows = maxRows.clamp(0, 20).toInt();
+    if (waterGoal != null) widgetWaterGoal = waterGoal.clamp(1, 30).toInt();
+    _changed();
+  }
+
+  /// Applies a ready-made layout in one go.
+  void applyWidgetLayout({
+    required List<String> order,
+    required List<String> off,
+    required List<String> stats,
+  }) {
+    widgetOrder = _completeOrder(order);
+    widgetOff = List<String>.from(off);
+    widgetStats = stats.take(4).toList();
+    widgetBlocksSeeded = true;
+    _changed();
+  }
+
   void setWidgetBlockOn(String key, bool on) {
     widgetOff.remove(key);
     if (!on) widgetOff.add(key);
@@ -375,6 +473,14 @@ class Extras extends ChangeNotifier {
   void changeWater(int delta) {
     final next = ((water[todayKey] ?? 0) + delta).clamp(0, 30).toInt();
     water[todayKey] = next;
+    _changed();
+  }
+
+  /// Adjusts the water count for a specific day (used when ticks made on the
+  /// home-screen widget are applied after midnight).
+  void changeWaterOn(DateTime day, int delta) {
+    final key = dayKey(day);
+    water[key] = ((water[key] ?? 0) + delta).clamp(0, 30).toInt();
     _changed();
   }
 

@@ -1,0 +1,3180 @@
+diff --git a/android_overrides/widget/HabitsWidgetProvider.kt b/android_overrides/widget/HabitsWidgetProvider.kt
+index 06d473f..b7f3aef 100644
+--- a/android_overrides/widget/HabitsWidgetProvider.kt
++++ b/android_overrides/widget/HabitsWidgetProvider.kt
+@@ -1,14 +1,17 @@
+ package ai.aandccreative.prakriya
+ 
++import android.app.AlarmManager
+ import android.app.PendingIntent
+ import android.appwidget.AppWidgetManager
+ import android.content.ComponentName
+ import android.content.Context
+ import android.content.Intent
+ import android.content.SharedPreferences
++import android.content.res.Configuration
+ import android.graphics.Color
+ import android.net.Uri
+ import android.os.Bundle
++import android.util.TypedValue
+ import android.view.View
+ import android.widget.RemoteViews
+ import es.antonborri.home_widget.HomeWidgetPlugin
+@@ -18,15 +21,16 @@ import org.json.JSONArray
+ import org.json.JSONObject
+ 
+ /**
+- * Prakriyā home-screen widget: a small dashboard plus the to-do list and
+- * habit checklist. The Flutter side writes everything as text into shared
+- * preferences (look, which blocks to show and in what order, the lists);
+- * this class turns that into RemoteViews.
++ * Prakriyā home-screen widget: a small dashboard with the to-do list, habit
++ * checklist, water tracker and week strip. The Flutter side writes everything
++ * as text into shared preferences (look, which blocks to show and in what
++ * order, the lists); this class turns that into RemoteViews.
+  *
+- * Ticking a task or habit works right on the widget: the new state is saved
+- * to the same preferences and redrawn at once, and the change is queued in
+- * "widget_pending" for the app to apply the next time it opens. Tapping a
+- * title opens the app on the matching screen.
++ * Ticking a task or habit, or logging water, works right on the widget: the
++ * new state is saved to the same preferences and redrawn at once, and the
++ * change is queued in "widget_pending" for the app to apply the next time it
++ * opens. The widget also rolls itself over to the new day at midnight, so it
++ * is correct even if the app has not been opened.
+  */
+ class HabitsWidgetProvider : HomeWidgetProvider() {
+ 
+@@ -37,6 +41,7 @@ class HabitsWidgetProvider : HomeWidgetProvider() {
+ 
+     private class Palette(
+         val key: String,
++        val light: Boolean,
+         val background: Int,
+         val title: Int,
+         val text: Int,
+@@ -45,27 +50,31 @@ class HabitsWidgetProvider : HomeWidgetProvider() {
+         val done: Int
+     )
+ 
++    private fun c(hex: String): Int = Color.parseColor(hex)
++
+     private fun palette(style: String?): Palette {
+         return when (style) {
+-            "sunrise" -> Palette("sunrise", R.drawable.widget_bg_sunrise,
+-                Color.parseColor("#C2531A"), Color.parseColor("#3A2216"),
+-                Color.parseColor("#8A5A3C"), Color.parseColor("#E2661F"),
+-                Color.parseColor("#B59A86"))
+-            "forest" -> Palette("forest", R.drawable.widget_bg_forest,
+-                Color.parseColor("#7BE0B2"), Color.parseColor("#E6F5EC"),
+-                Color.parseColor("#8FBFA6"), Color.parseColor("#5ED39A"),
+-                Color.parseColor("#6E9C87"))
+-            "paper" -> Palette("paper", R.drawable.widget_bg_paper,
+-                Color.parseColor("#5A32A8"), Color.parseColor("#2B2140"),
+-                Color.parseColor("#8E84A3"), Color.parseColor("#6B3FC4"),
+-                Color.parseColor("#A89FB8"))
+-            else -> Palette("dusk", R.drawable.widget_bg_dusk,
+-                Color.parseColor("#F2B93B"), Color.parseColor("#F4EEFF"),
+-                Color.parseColor("#A99BD0"), Color.parseColor("#F2B93B"),
+-                Color.parseColor("#7F72A8"))
++            "midnight" -> Palette("midnight", false, R.drawable.widget_bg_midnight,
++                c("#FFFFFF"), c("#F2F2F5"), c("#9A9AA8"), c("#7CC4FF"), c("#70707E"))
++            "ocean" -> Palette("ocean", false, R.drawable.widget_bg_ocean,
++                c("#7FD8FF"), c("#EAF6FF"), c("#93BAD6"), c("#4FC3F7"), c("#6C90AA"))
++            "forest" -> Palette("forest", false, R.drawable.widget_bg_forest,
++                c("#7BE0B2"), c("#E6F5EC"), c("#9CC8B2"), c("#5ED39A"), c("#729F8B"))
++            "graphite" -> Palette("graphite", false, R.drawable.widget_bg_graphite,
++                c("#FFC857"), c("#F1F3F5"), c("#A9B0BA"), c("#FFC857"), c("#7E858F"))
++            "sunrise" -> Palette("sunrise", true, R.drawable.widget_bg_sunrise,
++                c("#C2531A"), c("#3A2216"), c("#7A4E32"), c("#E2661F"), c("#A48A76"))
++            "rose" -> Palette("rose", true, R.drawable.widget_bg_rose,
++                c("#B8264F"), c("#3B1A25"), c("#7A4A5C"), c("#D6336C"), c("#A98593"))
++            "paper" -> Palette("paper", true, R.drawable.widget_bg_paper,
++                c("#5A32A8"), c("#2B2140"), c("#766C8C"), c("#6B3FC4"), c("#9E95AE"))
++            else -> Palette("dusk", false, R.drawable.widget_bg_dusk,
++                c("#F2B93B"), c("#F4EEFF"), c("#B4A8DA"), c("#F2B93B"), c("#8A7DB0"))
+         }
+     }
+ 
++    // ---- Entry points ----
++
+     override fun onUpdate(
+         context: Context,
+         appWidgetManager: AppWidgetManager,
+@@ -75,6 +84,7 @@ class HabitsWidgetProvider : HomeWidgetProvider() {
+         for (id in appWidgetIds) {
+             appWidgetManager.updateAppWidget(id, build(context, appWidgetManager, id, widgetData))
+         }
++        scheduleMidnight(context)
+     }
+ 
+     override fun onAppWidgetOptionsChanged(
+@@ -91,63 +101,204 @@ class HabitsWidgetProvider : HomeWidgetProvider() {
+ 
+     override fun onReceive(context: Context, intent: Intent) {
+         if (intent.action == ACTION_TOGGLE) {
+-            handleToggle(context, intent)
++            handleAction(context, intent)
+             return
+         }
+         super.onReceive(context, intent)
+     }
+ 
+-    // ---- Toggling from the widget ----
++    /** A soft refresh just after midnight so the widget shows the new day. */
++    private fun scheduleMidnight(context: Context) {
++        try {
++            val alarms = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
++            val at = Calendar.getInstance()
++            at.add(Calendar.DAY_OF_YEAR, 1)
++            at.set(Calendar.HOUR_OF_DAY, 0)
++            at.set(Calendar.MINUTE, 1)
++            at.set(Calendar.SECOND, 0)
++            at.set(Calendar.MILLISECOND, 0)
++            val ids = AppWidgetManager.getInstance(context)
++                .getAppWidgetIds(ComponentName(context, HabitsWidgetProvider::class.java))
++            val intent = Intent(context, HabitsWidgetProvider::class.java)
++            intent.action = AppWidgetManager.ACTION_APPWIDGET_UPDATE
++            intent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids)
++            val pending = PendingIntent.getBroadcast(
++                context, 7, intent,
++                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
++            alarms.set(AlarmManager.RTC, at.timeInMillis, pending)
++        } catch (e: Exception) {
++            // The 30-minute system refresh still covers this.
++        }
++    }
++
++    // ---- Small helpers ----
++
++    private fun str(data: SharedPreferences, key: String, def: String): String =
++        data.getString(key, def) ?: def
++
++    private fun flag(data: SharedPreferences, key: String, def: Boolean): Boolean =
++        str(data, key, if (def) "1" else "0") == "1"
++
++    private fun intOf(data: SharedPreferences, key: String, def: Int): Int =
++        str(data, key, def.toString()).toIntOrNull() ?: def
++
++    private fun readArray(data: SharedPreferences, key: String): JSONArray {
++        return try {
++            JSONArray(str(data, key, "[]"))
++        } catch (e: Exception) {
++            JSONArray()
++        }
++    }
++
++    private fun todayKey(): String {
++        val cal = Calendar.getInstance()
++        return String.format(
++            "%04d-%02d-%02d", cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1,
++            cal.get(Calendar.DAY_OF_MONTH))
++    }
+ 
+-    private fun handleToggle(context: Context, intent: Intent) {
++    private fun parseDay(key: String): Calendar? {
++        val parts = key.split("-")
++        if (parts.size != 3) return null
++        val y = parts[0].toIntOrNull() ?: return null
++        val m = parts[1].toIntOrNull() ?: return null
++        val d = parts[2].toIntOrNull() ?: return null
++        val cal = Calendar.getInstance()
++        cal.set(y, m - 1, d, 12, 0, 0)
++        return cal
++    }
++
++    // ---- New-day rollover ----
++
++    /**
++     * If the saved data is from an earlier day, move it to today: habits
++     * start unticked, the list becomes tomorrow's tasks as the app last saw
++     * them, water restarts and the week strip slides along.
++     */
++    private fun rollOver(data: SharedPreferences) {
++        val day = str(data, "widget_day", "")
++        val today = todayKey()
++        if (day.isEmpty() || day == today) return
++        val editor = data.edit()
++        try {
++            val habits = readArray(data, "widget_habits")
++            for (i in 0 until habits.length()) {
++                habits.getJSONObject(i).put("d", false)
++            }
++            editor.putString("widget_habits", habits.toString())
++
++            val nextDay = str(data, "widget_next_day", "")
++            val tasks = if (nextDay == today) str(data, "widget_tasks_next", "[]") else "[]"
++            editor.putString("widget_tasks", tasks)
++            editor.putString("widget_tasks_next", "[]")
++            editor.putString("widget_next_day", "")
++            editor.putString("widget_water", "0")
++
++            // Slide the week strip.
++            val from = parseDay(day)
++            val to = parseDay(today)
++            if (from != null && to != null) {
++                val diff = ((to.timeInMillis - from.timeInMillis) / 86400000L).toInt()
++                val steps = if (diff > 7) 7 else diff
++                val old = readArray(data, "widget_week")
++                if (steps > 0 && old.length() == 7) {
++                    val letters = arrayOf("M", "T", "W", "T", "F", "S", "S")
++                    val out = JSONArray()
++                    for (i in steps until old.length()) out.put(old.get(i))
++                    for (back in steps - 1 downTo 0) {
++                        val cal = Calendar.getInstance()
++                        cal.add(Calendar.DAY_OF_YEAR, -back)
++                        val letter = letters[(cal.get(Calendar.DAY_OF_WEEK) + 5) % 7]
++                        out.put(JSONObject().put("l", letter).put("p", 0))
++                    }
++                    editor.putString("widget_week", out.toString())
++                }
++            }
++        } catch (e: Exception) {
++            // Keep whatever was there; the app rewrites it when it next runs.
++        }
++        editor.putString("widget_day", today)
++        editor.apply()
++    }
++
++    // ---- Actions from the widget (tick, water) ----
++
++    private fun handleAction(context: Context, intent: Intent) {
+         val kind = intent.getStringExtra("kind") ?: return
+-        val key = intent.getStringExtra("key") ?: return
+-        val index = intent.getIntExtra("index", -1)
+         val prefs = HomeWidgetPlugin.getData(context)
+-        val listKey = if (kind == "task") "widget_tasks" else "widget_habits"
++        rollOver(prefs)
++        val day = str(prefs, "widget_day", todayKey())
+         try {
+-            val arr = JSONArray(prefs.getString(listKey, "[]") ?: "[]")
+-            var found = false
+-            var newValue = false
+-            for (i in 0 until arr.length()) {
+-                val o = arr.getJSONObject(i)
+-                val match = if (kind == "task") {
+-                    o.optInt("i", -2) == index && o.optString("t") == key
+-                } else {
+-                    o.optString("id") == key
++            val pending = JSONArray(str(prefs, "widget_pending", "[]"))
++            val kept = JSONArray()
++
++            if (kind == "water") {
++                val delta = intent.getIntExtra("delta", 0)
++                if (delta == 0) return
++                val current = intOf(prefs, "widget_water", 0)
++                var next = current + delta
++                if (next < 0) next = 0
++                if (next > 30) next = 30
++                val applied = next - current
++                if (applied == 0) return
++                var total = applied
++                for (i in 0 until pending.length()) {
++                    val p = pending.getJSONObject(i)
++                    if (p.optString("k") == "water" && p.optString("day") == day) {
++                        total += p.optInt("delta", 0)
++                    } else {
++                        kept.put(p)
++                    }
+                 }
+-                if (match) {
+-                    newValue = !o.optBoolean("d", false)
+-                    o.put("d", newValue)
+-                    found = true
+-                    break
++                if (total != 0) {
++                    kept.put(
++                        JSONObject().put("k", "water").put("delta", total).put("day", day))
+                 }
+-            }
+-            if (!found) return
++                prefs.edit()
++                    .putString("widget_water", next.toString())
++                    .putString("widget_pending", kept.toString())
++                    .apply()
++            } else {
++                val key = intent.getStringExtra("key") ?: return
++                val index = intent.getIntExtra("index", -1)
++                val listKey = if (kind == "task") "widget_tasks" else "widget_habits"
++                val arr = JSONArray(str(prefs, listKey, "[]"))
++                var found = false
++                var newValue = false
++                for (i in 0 until arr.length()) {
++                    val o = arr.getJSONObject(i)
++                    val match = if (kind == "task") {
++                        o.optInt("i", -2) == index && o.optString("t") == key
++                    } else {
++                        o.optString("id") == key
++                    }
++                    if (match) {
++                        newValue = !o.optBoolean("d", false)
++                        o.put("d", newValue)
++                        found = true
++                        break
++                    }
++                }
++                if (!found) return
+ 
+-            // Queue the change for the app; a later tap on the same item
+-            // replaces the earlier one.
+-            val pending = JSONArray(prefs.getString("widget_pending", "[]") ?: "[]")
+-            val kept = JSONArray()
+-            for (i in 0 until pending.length()) {
+-                val p = pending.getJSONObject(i)
+-                val same = p.optString("k") == kind &&
+-                    p.optString("key") == key &&
+-                    p.optInt("i", -2) == index
+-                if (!same) kept.put(p)
++                // A later tap on the same item replaces the earlier one.
++                for (i in 0 until pending.length()) {
++                    val p = pending.getJSONObject(i)
++                    val same = p.optString("k") == kind &&
++                        p.optString("key") == key &&
++                        p.optInt("i", -2) == index &&
++                        p.optString("day") == day
++                    if (!same) kept.put(p)
++                }
++                kept.put(
++                    JSONObject()
++                        .put("k", kind).put("key", key).put("i", index)
++                        .put("v", newValue).put("day", day))
++                prefs.edit()
++                    .putString(listKey, arr.toString())
++                    .putString("widget_pending", kept.toString())
++                    .apply()
+             }
+-            val entry = JSONObject()
+-            entry.put("k", kind)
+-            entry.put("key", key)
+-            entry.put("i", index)
+-            entry.put("v", newValue)
+-            entry.put("day", prefs.getString("widget_day", "") ?: "")
+-            kept.put(entry)
+-
+-            prefs.edit()
+-                .putString(listKey, arr.toString())
+-                .putString("widget_pending", kept.toString())
+-                .apply()
+         } catch (e: Exception) {
+             return
+         }
+@@ -177,13 +328,17 @@ class HabitsWidgetProvider : HomeWidgetProvider() {
+             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+     }
+ 
+-    private fun toggleIntent(context: Context, kind: String, key: String, index: Int): PendingIntent {
++    private fun actionIntent(
++        context: Context, kind: String, key: String, index: Int, delta: Int
++    ): PendingIntent {
+         val intent = Intent(context, HabitsWidgetProvider::class.java)
+         intent.action = ACTION_TOGGLE
+-        intent.data = Uri.parse("prakriya://widget/toggle/$kind/$index/" + Uri.encode(key))
++        intent.data = Uri.parse(
++            "prakriya://widget/action/$kind/$index/$delta/" + Uri.encode(key))
+         intent.putExtra("kind", kind)
+         intent.putExtra("key", key)
+         intent.putExtra("index", index)
++        intent.putExtra("delta", delta)
+         return PendingIntent.getBroadcast(
+             context, 0, intent,
+             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+@@ -191,45 +346,73 @@ class HabitsWidgetProvider : HomeWidgetProvider() {
+ 
+     // ---- Drawing ----
+ 
+-    private fun todayKey(): String {
+-        val c = Calendar.getInstance()
+-        return String.format(
+-            "%04d-%02d-%02d", c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1,
+-            c.get(Calendar.DAY_OF_MONTH))
+-    }
+-
+-    private fun readArray(data: SharedPreferences, key: String): JSONArray {
+-        return try {
+-            JSONArray(data.getString(key, "[]") ?: "[]")
+-        } catch (e: Exception) {
+-            JSONArray()
+-        }
+-    }
+-
+     private fun build(
+         context: Context,
+         manager: AppWidgetManager,
+         id: Int,
+         data: SharedPreferences
+     ): RemoteViews {
+-        val p = palette(data.getString("widget_style", "dusk"))
++        rollOver(data)
++
++        val base = palette(str(data, "widget_style", "dusk"))
++        var accent = base.accent
++        var titleColor = base.title
++        val accentHex = str(data, "widget_accent", "")
++        if (accentHex.isNotEmpty()) {
++            try {
++                accent = Color.parseColor(accentHex)
++                titleColor = accent
++            } catch (e: Exception) {
++                // Keep the style's own colours.
++            }
++        }
++        val p = base
+         val pkg = context.packageName
++        val density = context.resources.displayMetrics.density
++
++        val sizeKey = str(data, "widget_text_size", "medium")
++        val scale = if (sizeKey == "small") 0.9f else if (sizeKey == "large") 1.2f else 1.0f
++        val compact = flag(data, "widget_compact", false)
++        val opacity = intOf(data, "widget_opacity", 100).coerceIn(30, 100)
++        val rowTapTicks = str(data, "widget_row_tap", "open") == "tick"
++        val maxRows = intOf(data, "widget_max_rows", 0)
++        val showDate = flag(data, "widget_show_date", true)
++        val showDoneTasks = flag(data, "widget_show_done_tasks", true)
++
+         val views = RemoteViews(pkg, R.layout.habits_widget)
+-        views.setInt(R.id.widget_root, "setBackgroundResource", p.background)
++        views.setImageViewResource(R.id.widget_bg, p.background)
++        views.setInt(R.id.widget_bg, "setImageAlpha", (opacity * 255) / 100)
+ 
++        // Usable height (dp). Portrait uses the maximum height the launcher
++        // reports, landscape the minimum.
+         val options = manager.getAppWidgetOptions(id)
+-        var height = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 180)
++        val portrait = context.resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
++        var height = options.getInt(
++            if (portrait) AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT
++            else AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 0)
++        if (height <= 0) height = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 180)
+         if (height <= 0) height = 180
+-        var budget = height - 24 - 40 - 6
+ 
+         // Header
+-        views.setTextViewText(R.id.widget_title, "Prakriyā")
+-        views.setTextColor(R.id.widget_title, p.title)
+-        val dateLabel = data.getString("widget_date", "") ?: ""
+-        views.setTextViewText(R.id.widget_date, dateLabel)
+-        views.setTextColor(R.id.widget_date, p.muted)
+-        views.setViewVisibility(R.id.widget_date, if (dateLabel.isEmpty()) View.GONE else View.VISIBLE)
+-        views.setTextColor(R.id.widget_add, p.accent)
++        val mode = str(data, "widget_title_mode", "app")
++        val title = when (mode) {
++            "greeting" -> greeting(str(data, "widget_user", ""))
++            "day" -> "Today"
++            else -> "Prakriyā"
++        }
++        views.setTextViewText(R.id.widget_title, title)
++        views.setTextColor(R.id.widget_title, titleColor)
++        views.setTextViewTextSize(R.id.widget_title, TypedValue.COMPLEX_UNIT_SP, 15f * scale)
++        val dateLabel = str(data, "widget_date", "")
++        if (showDate && dateLabel.isNotEmpty()) {
++            views.setTextViewText(R.id.widget_date, dateLabel)
++            views.setTextColor(R.id.widget_date, p.muted)
++            views.setTextViewTextSize(R.id.widget_date, TypedValue.COMPLEX_UNIT_SP, 11f * scale)
++            views.setViewVisibility(R.id.widget_date, View.VISIBLE)
++        } else {
++            views.setViewVisibility(R.id.widget_date, View.GONE)
++        }
++        views.setTextColor(R.id.widget_add, accent)
+         val openDash = openIntent(context, "dashboard")
+         val openAdd = openIntent(context, "addtask")
+         if (openDash != null) {
+@@ -238,20 +421,20 @@ class HabitsWidgetProvider : HomeWidgetProvider() {
+         }
+         if (openAdd != null) views.setOnClickPendingIntent(R.id.widget_add, openAdd)
+ 
++        var budget = height.toFloat() - 28f - (if (showDate) 36f else 22f) * scale - 10f
++
+         // Data
+-        val day = data.getString("widget_day", "") ?: ""
+-        val stale = day.isNotEmpty() && day != todayKey()
+-        val showDoneTasks = (data.getString("widget_show_done_tasks", "1") ?: "1") == "1"
+-        val allTasks = if (stale) JSONArray() else readArray(data, "widget_tasks")
+-        val habits = if (stale) JSONArray() else readArray(data, "widget_habits")
++        val tasks = readArray(data, "widget_tasks")
++        val habits = readArray(data, "widget_habits")
+         var tasksDone = 0
+-        for (i in 0 until allTasks.length()) {
+-            if (allTasks.getJSONObject(i).optBoolean("d", false)) tasksDone++
++        for (i in 0 until tasks.length()) {
++            if (tasks.getJSONObject(i).optBoolean("d", false)) tasksDone++
+         }
+         var habitsDone = 0
+         for (i in 0 until habits.length()) {
+             if (habits.getJSONObject(i).optBoolean("d", false)) habitsDone++
+         }
++        val rowBg = if (p.light) R.drawable.widget_row_bg_light else R.drawable.widget_row_bg_dark
+ 
+         val blocks = readArray(data, "widget_blocks")
+         views.removeAllViews(R.id.widget_content)
+@@ -259,82 +442,143 @@ class HabitsWidgetProvider : HomeWidgetProvider() {
+         for (b in 0 until blocks.length()) {
+             when (blocks.optString(b)) {
+                 "stats" -> {
+-                    if (budget >= 46) {
+-                        val stats = readArray(data, "widget_stats")
+-                        if (stats.length() > 0) {
+-                            val child = RemoteViews(pkg, R.layout.widget_block_stats)
+-                            val cells = intArrayOf(R.id.stat_c1, R.id.stat_c2, R.id.stat_c3, R.id.stat_c4)
+-                            val values = intArrayOf(R.id.stat_v1, R.id.stat_v2, R.id.stat_v3, R.id.stat_v4)
+-                            val labels = intArrayOf(R.id.stat_l1, R.id.stat_l2, R.id.stat_l3, R.id.stat_l4)
+-                            for (i in 0 until 4) {
+-                                if (i < stats.length()) {
+-                                    val s = stats.getJSONObject(i)
+-                                    val kind = s.optString("k")
+-                                    var value = s.optString("v", "")
+-                                    if (kind == "habits") {
+-                                        value = if (stale || habits.length() == 0) "–" else "$habitsDone/${habits.length()}"
+-                                    } else if (kind == "tasks") {
+-                                        value = if (stale || allTasks.length() == 0) "–" else "$tasksDone/${allTasks.length()}"
+-                                    }
+-                                    child.setTextViewText(values[i], value)
+-                                    child.setTextColor(values[i], p.text)
+-                                    child.setTextViewText(labels[i], s.optString("l", ""))
+-                                    child.setTextColor(labels[i], p.muted)
+-                                    child.setViewVisibility(cells[i], View.VISIBLE)
+-                                } else {
+-                                    child.setViewVisibility(cells[i], View.GONE)
++                    val cost = (20f + 11f) * 1.3f * scale + 10f
++                    val stats = readArray(data, "widget_stats")
++                    if (budget >= cost && stats.length() > 0) {
++                        val child = RemoteViews(pkg, R.layout.widget_block_stats)
++                        val cells = intArrayOf(R.id.stat_c1, R.id.stat_c2, R.id.stat_c3, R.id.stat_c4)
++                        val values = intArrayOf(R.id.stat_v1, R.id.stat_v2, R.id.stat_v3, R.id.stat_v4)
++                        val labels = intArrayOf(R.id.stat_l1, R.id.stat_l2, R.id.stat_l3, R.id.stat_l4)
++                        for (i in 0 until 4) {
++                            if (i < stats.length()) {
++                                val s = stats.getJSONObject(i)
++                                val kind = s.optString("k")
++                                var value = s.optString("v", "")
++                                if (kind == "habits") {
++                                    value = if (habits.length() == 0) "–" else "$habitsDone/${habits.length()}"
++                                } else if (kind == "tasks") {
++                                    value = if (tasks.length() == 0) "–" else "$tasksDone/${tasks.length()}"
++                                } else if (kind == "open") {
++                                    value = (tasks.length() - tasksDone).toString()
+                                 }
++                                child.setTextViewText(values[i], value)
++                                child.setTextColor(values[i], p.text)
++                                child.setTextViewTextSize(values[i], TypedValue.COMPLEX_UNIT_SP, 20f * scale)
++                                child.setTextViewText(labels[i], s.optString("l", ""))
++                                child.setTextColor(labels[i], p.muted)
++                                child.setTextViewTextSize(labels[i], TypedValue.COMPLEX_UNIT_SP, 11f * scale)
++                                child.setViewVisibility(cells[i], View.VISIBLE)
++                            } else {
++                                child.setViewVisibility(cells[i], View.GONE)
+                             }
+-                            views.addView(R.id.widget_content, child)
+-                            budget -= 46
+                         }
++                        views.addView(R.id.widget_content, child)
++                        budget -= cost
+                     }
+                 }
+                 "progress" -> {
+-                    val total = habits.length() + allTasks.length()
+-                    if (budget >= 36 && total > 0) {
++                    val total = habits.length() + tasks.length()
++                    val cost = 12f * 1.3f * scale + 22f
++                    if (budget >= cost && total > 0) {
+                         val done = habitsDone + tasksDone
+-                        val pct = (done * 100) / total
++                        val filled = ((done * 10f) / total).let { Math.round(it) }
+                         val child = RemoteViews(pkg, R.layout.widget_block_progress)
+-                        val bars = mapOf(
+-                            "dusk" to R.id.progress_dusk,
+-                            "sunrise" to R.id.progress_sunrise,
+-                            "forest" to R.id.progress_forest,
+-                            "paper" to R.id.progress_paper
+-                        )
+-                        for ((key, barId) in bars) {
+-                            child.setViewVisibility(barId, if (key == p.key) View.VISIBLE else View.GONE)
++                        val segs = intArrayOf(
++                            R.id.seg1, R.id.seg2, R.id.seg3, R.id.seg4, R.id.seg5,
++                            R.id.seg6, R.id.seg7, R.id.seg8, R.id.seg9, R.id.seg10)
++                        for (i in segs.indices) {
++                            if (i < filled) {
++                                child.setInt(segs[i], "setColorFilter", accent)
++                                child.setInt(segs[i], "setImageAlpha", 255)
++                            } else {
++                                child.setInt(segs[i], "setColorFilter", p.muted)
++                                child.setInt(segs[i], "setImageAlpha", 90)
++                            }
+                         }
+-                        val activeBar = bars[p.key] ?: R.id.progress_dusk
+-                        child.setProgressBar(activeBar, 100, pct, false)
+                         child.setTextViewText(
+                             R.id.progress_label,
+                             if (done >= total) "Everything done today" else "$done of $total done today")
+                         child.setTextColor(R.id.progress_label, p.muted)
++                        child.setTextViewTextSize(R.id.progress_label, TypedValue.COMPLEX_UNIT_SP, 12f * scale)
+                         views.addView(R.id.widget_content, child)
+-                        budget -= 36
++                        budget -= cost
+                     }
+                 }
+                 "tasks" -> {
+                     budget = addList(
+-                        context, views, p, budget, "task", "TO-DO",
+-                        allTasks, stale, showDoneTasks,
+-                        "No tasks yet. Tap + to add one.")
++                        context, views, p, accent, budget, scale, compact, density, rowBg,
++                        "task", "TO-DO", tasks, showDoneTasks, maxRows, rowTapTicks,
++                        "No tasks yet for today. Tap + to add one.")
+                 }
+                 "habits" -> {
+                     budget = addList(
+-                        context, views, p, budget, "habit", "HABITS",
+-                        habits, stale, true,
++                        context, views, p, accent, budget, scale, compact, density, rowBg,
++                        "habit", "HABITS", habits, true, maxRows, rowTapTicks,
+                         "No habits selected. Pick some in the app.")
+                 }
++                "water" -> {
++                    val cost = 44f
++                    if (budget >= cost) {
++                        val goal = intOf(data, "widget_water_goal", 8)
++                        val count = intOf(data, "widget_water", 0)
++                        val child = RemoteViews(pkg, R.layout.widget_block_water)
++                        child.setTextViewText(R.id.water_label, "Water  $count / $goal")
++                        child.setTextColor(R.id.water_label, p.text)
++                        child.setTextViewTextSize(R.id.water_label, TypedValue.COMPLEX_UNIT_SP, 14f * scale)
++                        for (btn in intArrayOf(R.id.water_minus, R.id.water_plus)) {
++                            child.setInt(btn, "setBackgroundResource", rowBg)
++                            child.setTextColor(btn, accent)
++                        }
++                        child.setOnClickPendingIntent(
++                            R.id.water_minus, actionIntent(context, "water", "water", -1, -1))
++                        child.setOnClickPendingIntent(
++                            R.id.water_plus, actionIntent(context, "water", "water", -1, 1))
++                        views.addView(R.id.widget_content, child)
++                        budget -= cost
++                    }
++                }
++                "week" -> {
++                    val cost = 11f * 1.3f * scale + 30f
++                    val week = readArray(data, "widget_week")
++                    if (budget >= cost && week.length() == 7) {
++                        val child = RemoteViews(pkg, R.layout.widget_block_week)
++                        val letters = intArrayOf(
++                            R.id.wk_l1, R.id.wk_l2, R.id.wk_l3, R.id.wk_l4,
++                            R.id.wk_l5, R.id.wk_l6, R.id.wk_l7)
++                        val dots = intArrayOf(
++                            R.id.wk_d1, R.id.wk_d2, R.id.wk_d3, R.id.wk_d4,
++                            R.id.wk_d5, R.id.wk_d6, R.id.wk_d7)
++                        for (i in 0 until 7) {
++                            val d = week.getJSONObject(i)
++                            val percent = d.optInt("p", 0)
++                            child.setTextViewText(letters[i], d.optString("l", ""))
++                            child.setTextColor(letters[i], if (i == 6) accent else p.muted)
++                            child.setTextViewTextSize(letters[i], TypedValue.COMPLEX_UNIT_SP, 11f * scale)
++                            if (percent <= 0) {
++                                child.setInt(dots[i], "setColorFilter", p.muted)
++                                child.setInt(dots[i], "setImageAlpha", 70)
++                            } else if (percent < 100) {
++                                child.setInt(dots[i], "setColorFilter", accent)
++                                child.setInt(dots[i], "setImageAlpha", 150)
++                            } else {
++                                child.setInt(dots[i], "setColorFilter", accent)
++                                child.setInt(dots[i], "setImageAlpha", 255)
++                            }
++                        }
++                        views.addView(R.id.widget_content, child)
++                        budget -= cost
++                    }
++                }
+                 "mantra" -> {
+-                    val mantra = data.getString("widget_mantra", "") ?: ""
+-                    if (mantra.isNotEmpty() && budget >= 44) {
++                    val mantra = str(data, "widget_mantra", "")
++                    val cost = 13f * 1.3f * 2f * scale + 12f
++                    if (mantra.isNotEmpty() && budget >= cost) {
+                         val child = RemoteViews(pkg, R.layout.widget_block_text)
+                         child.setTextViewText(R.id.text_body, "“$mantra”")
+                         child.setTextColor(R.id.text_body, p.text)
++                        child.setTextViewTextSize(R.id.text_body, TypedValue.COMPLEX_UNIT_SP, 13f * scale)
+                         views.addView(R.id.widget_content, child)
+-                        budget -= 44
++                        budget -= cost
+                     }
+                 }
+             }
+@@ -342,29 +586,44 @@ class HabitsWidgetProvider : HomeWidgetProvider() {
+         return views
+     }
+ 
++    private fun greeting(name: String): String {
++        val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
++        val part = if (hour < 12) "Good morning" else if (hour < 17) "Good afternoon" else "Good evening"
++        return if (name.trim().isEmpty()) part else part + ", " + name.trim()
++    }
++
+     /**
+      * Adds a titled list (tasks or habits) as far as the remaining height
+-     * allows, and returns the height left over.
++     * allows and returns the height left over.
+      */
+     private fun addList(
+         context: Context,
+         views: RemoteViews,
+         p: Palette,
+-        budgetIn: Int,
++        accent: Int,
++        budgetIn: Float,
++        scale: Float,
++        compact: Boolean,
++        density: Float,
++        rowBg: Int,
+         kind: String,
+         title: String,
+         items: JSONArray,
+-        stale: Boolean,
+         showDone: Boolean,
++        maxRows: Int,
++        rowTapTicks: Boolean,
+         emptyText: String
+-    ): Int {
++    ): Float {
+         var budget = budgetIn
+         val pkg = context.packageName
+-        if (budget < 24 + 26) return budget
++        val textSp = 14f * scale
++        val padDp = if (compact) 3f else 6f
++        val rowCost = textSp * 1.4f + padDp * 2f + 6f
++        val headerCost = 12f * 1.3f * scale + 12f
++        if (budget < headerCost + rowCost) return budget
+ 
+         val open = openIntent(context, if (kind == "task") "tasks" else "dashboard")
+ 
+-        // Rows that should be visible.
+         val rows = ArrayList<JSONObject>()
+         var doneCount = 0
+         for (i in 0 until items.length()) {
+@@ -373,44 +632,65 @@ class HabitsWidgetProvider : HomeWidgetProvider() {
+             if (showDone || !o.optBoolean("d", false)) rows.add(o)
+         }
+ 
++        // How many rows fit, and how many the user allows.
++        var fit = ((budget - headerCost) / rowCost).toInt()
++        if (maxRows > 0 && fit > maxRows) fit = maxRows
++        val shown = if (rows.size < fit) rows.size else fit
++        val hidden = rows.size - shown
++
+         val header = RemoteViews(pkg, R.layout.widget_block_header)
+         header.setTextViewText(R.id.hdr_text, title)
+-        header.setTextColor(R.id.hdr_text, p.muted)
+-        header.setTextViewText(
+-            R.id.hdr_count, if (items.length() == 0) "" else "$doneCount/${items.length()}")
++        header.setTextColor(R.id.hdr_text, accent)
++        header.setTextViewTextSize(R.id.hdr_text, TypedValue.COMPLEX_UNIT_SP, 12f * scale)
++        var count = if (items.length() == 0) "" else "$doneCount/${items.length()}"
++        if (hidden > 0) count = if (count.isEmpty()) "+$hidden more" else "$count · +$hidden more"
++        header.setTextViewText(R.id.hdr_count, count)
+         header.setTextColor(R.id.hdr_count, p.muted)
+-        if (open != null) header.setOnClickPendingIntent(R.id.hdr_text, open)
++        header.setTextViewTextSize(R.id.hdr_count, TypedValue.COMPLEX_UNIT_SP, 12f * scale)
++        if (open != null) {
++            header.setOnClickPendingIntent(R.id.hdr_text, open)
++            header.setOnClickPendingIntent(R.id.hdr_count, open)
++        }
+         views.addView(R.id.widget_content, header)
+-        budget -= 24
++        budget -= headerCost
+ 
+-        if (stale || rows.isEmpty()) {
++        if (rows.isEmpty()) {
+             val note = RemoteViews(pkg, R.layout.widget_block_text)
+-            val text = if (stale) "New day. Tap to load today's list." else if (items.length() == 0) emptyText else "All done. Nicely done."
++            val text = if (items.length() == 0) emptyText else "All done. Nicely done."
+             note.setTextViewText(R.id.text_body, text)
+             note.setTextColor(R.id.text_body, p.muted)
++            note.setTextViewTextSize(R.id.text_body, TypedValue.COMPLEX_UNIT_SP, 13f * scale)
+             if (open != null) note.setOnClickPendingIntent(R.id.text_body, open)
+             views.addView(R.id.widget_content, note)
+-            return budget - 34
++            return budget - (13f * 1.3f * 2f * scale + 10f)
+         }
+ 
+-        var shown = 0
+-        for (o in rows) {
+-            if (budget < 26) break
++        val padPx = (padDp * density).toInt()
++        val sidePx = (10f * density).toInt()
++        for (n in 0 until shown) {
++            val o = rows[n]
+             val row = RemoteViews(pkg, R.layout.widget_row)
+             val done = o.optBoolean("d", false)
+             val name = if (kind == "task") o.optString("t") else o.optString("n")
+             val key = if (kind == "task") o.optString("t") else o.optString("id")
+             val index = if (kind == "task") o.optInt("i", -1) else -1
++            row.setInt(R.id.row_root, "setBackgroundResource", rowBg)
++            row.setViewPadding(R.id.row_root, sidePx, padPx, sidePx, padPx)
+             row.setTextViewText(R.id.row_text, name)
+             row.setTextColor(R.id.row_text, if (done) p.done else p.text)
++            row.setTextViewTextSize(R.id.row_text, TypedValue.COMPLEX_UNIT_SP, textSp)
+             row.setImageViewResource(
+                 R.id.row_mark, if (done) R.drawable.widget_check_on else R.drawable.widget_check_off)
+-            row.setInt(R.id.row_mark, "setColorFilter", if (done) p.done else p.accent)
+-            row.setOnClickPendingIntent(R.id.row_mark, toggleIntent(context, kind, key, index))
+-            if (open != null) row.setOnClickPendingIntent(R.id.row_text, open)
++            row.setInt(R.id.row_mark, "setColorFilter", if (done) p.done else accent)
++            val tick = actionIntent(context, kind, key, index, 0)
++            row.setOnClickPendingIntent(R.id.row_mark, tick)
++            if (rowTapTicks) {
++                row.setOnClickPendingIntent(R.id.row_text, tick)
++            } else if (open != null) {
++                row.setOnClickPendingIntent(R.id.row_text, open)
++            }
+             views.addView(R.id.widget_content, row)
+-            budget -= 26
+-            shown++
++            budget -= rowCost
+         }
+         return budget
+     }
+diff --git a/android_overrides/widget/drawable/widget_bg_graphite.xml b/android_overrides/widget/drawable/widget_bg_graphite.xml
+new file mode 100644
+index 0000000..e3a8d8f
+--- /dev/null
++++ b/android_overrides/widget/drawable/widget_bg_graphite.xml
+@@ -0,0 +1,12 @@
++<?xml version="1.0" encoding="utf-8"?>
++<shape xmlns:android="http://schemas.android.com/apk/res/android"
++    android:shape="rectangle">
++    <gradient
++        android:angle="315"
++        android:startColor="#3A3F47"
++        android:endColor="#1C1F24" />
++    <corners android:radius="22dp" />
++    <stroke
++        android:width="1dp"
++        android:color="#565C66" />
++</shape>
+diff --git a/android_overrides/widget/drawable/widget_bg_midnight.xml b/android_overrides/widget/drawable/widget_bg_midnight.xml
+new file mode 100644
+index 0000000..d52259e
+--- /dev/null
++++ b/android_overrides/widget/drawable/widget_bg_midnight.xml
+@@ -0,0 +1,12 @@
++<?xml version="1.0" encoding="utf-8"?>
++<shape xmlns:android="http://schemas.android.com/apk/res/android"
++    android:shape="rectangle">
++    <gradient
++        android:angle="315"
++        android:startColor="#101014"
++        android:endColor="#000000" />
++    <corners android:radius="22dp" />
++    <stroke
++        android:width="1dp"
++        android:color="#2A2A33" />
++</shape>
+diff --git a/android_overrides/widget/drawable/widget_bg_ocean.xml b/android_overrides/widget/drawable/widget_bg_ocean.xml
+new file mode 100644
+index 0000000..6a3d191
+--- /dev/null
++++ b/android_overrides/widget/drawable/widget_bg_ocean.xml
+@@ -0,0 +1,12 @@
++<?xml version="1.0" encoding="utf-8"?>
++<shape xmlns:android="http://schemas.android.com/apk/res/android"
++    android:shape="rectangle">
++    <gradient
++        android:angle="315"
++        android:startColor="#0F3B5C"
++        android:endColor="#071B2E" />
++    <corners android:radius="22dp" />
++    <stroke
++        android:width="1dp"
++        android:color="#1F5F8B" />
++</shape>
+diff --git a/android_overrides/widget/drawable/widget_bg_rose.xml b/android_overrides/widget/drawable/widget_bg_rose.xml
+new file mode 100644
+index 0000000..029eb14
+--- /dev/null
++++ b/android_overrides/widget/drawable/widget_bg_rose.xml
+@@ -0,0 +1,12 @@
++<?xml version="1.0" encoding="utf-8"?>
++<shape xmlns:android="http://schemas.android.com/apk/res/android"
++    android:shape="rectangle">
++    <gradient
++        android:angle="315"
++        android:startColor="#FFF0F4"
++        android:endColor="#FFD3DF" />
++    <corners android:radius="22dp" />
++    <stroke
++        android:width="1dp"
++        android:color="#F0AFC2" />
++</shape>
+diff --git a/android_overrides/widget/drawable/widget_dot.xml b/android_overrides/widget/drawable/widget_dot.xml
+new file mode 100644
+index 0000000..993d4dc
+--- /dev/null
++++ b/android_overrides/widget/drawable/widget_dot.xml
+@@ -0,0 +1,10 @@
++<?xml version="1.0" encoding="utf-8"?>
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++    android:width="24dp"
++    android:height="24dp"
++    android:viewportWidth="24"
++    android:viewportHeight="24">
++    <path
++        android:fillColor="#FFFFFFFF"
++        android:pathData="M12,4a8,8 0 1,0 0,16a8,8 0 1,0 0,-16" />
++</vector>
+diff --git a/android_overrides/widget/drawable/widget_progress_dusk.xml b/android_overrides/widget/drawable/widget_progress_dusk.xml
+deleted file mode 100644
+index 5b7b192..0000000
+--- a/android_overrides/widget/drawable/widget_progress_dusk.xml
++++ /dev/null
+@@ -1,17 +0,0 @@
+-<?xml version="1.0" encoding="utf-8"?>
+-<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+-    <item android:id="@android:id/background">
+-        <shape android:shape="rectangle">
+-            <solid android:color="#33FFFFFF" />
+-            <corners android:radius="4dp" />
+-        </shape>
+-    </item>
+-    <item android:id="@android:id/progress">
+-        <clip>
+-            <shape android:shape="rectangle">
+-                <solid android:color="#F2B93B" />
+-                <corners android:radius="4dp" />
+-            </shape>
+-        </clip>
+-    </item>
+-</layer-list>
+diff --git a/android_overrides/widget/drawable/widget_progress_forest.xml b/android_overrides/widget/drawable/widget_progress_forest.xml
+deleted file mode 100644
+index f30d762..0000000
+--- a/android_overrides/widget/drawable/widget_progress_forest.xml
++++ /dev/null
+@@ -1,17 +0,0 @@
+-<?xml version="1.0" encoding="utf-8"?>
+-<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+-    <item android:id="@android:id/background">
+-        <shape android:shape="rectangle">
+-            <solid android:color="#33FFFFFF" />
+-            <corners android:radius="4dp" />
+-        </shape>
+-    </item>
+-    <item android:id="@android:id/progress">
+-        <clip>
+-            <shape android:shape="rectangle">
+-                <solid android:color="#5ED39A" />
+-                <corners android:radius="4dp" />
+-            </shape>
+-        </clip>
+-    </item>
+-</layer-list>
+diff --git a/android_overrides/widget/drawable/widget_progress_paper.xml b/android_overrides/widget/drawable/widget_progress_paper.xml
+deleted file mode 100644
+index 2ce4df3..0000000
+--- a/android_overrides/widget/drawable/widget_progress_paper.xml
++++ /dev/null
+@@ -1,17 +0,0 @@
+-<?xml version="1.0" encoding="utf-8"?>
+-<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+-    <item android:id="@android:id/background">
+-        <shape android:shape="rectangle">
+-            <solid android:color="#1F000000" />
+-            <corners android:radius="4dp" />
+-        </shape>
+-    </item>
+-    <item android:id="@android:id/progress">
+-        <clip>
+-            <shape android:shape="rectangle">
+-                <solid android:color="#6B3FC4" />
+-                <corners android:radius="4dp" />
+-            </shape>
+-        </clip>
+-    </item>
+-</layer-list>
+diff --git a/android_overrides/widget/drawable/widget_progress_sunrise.xml b/android_overrides/widget/drawable/widget_progress_sunrise.xml
+deleted file mode 100644
+index 87782ec..0000000
+--- a/android_overrides/widget/drawable/widget_progress_sunrise.xml
++++ /dev/null
+@@ -1,17 +0,0 @@
+-<?xml version="1.0" encoding="utf-8"?>
+-<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+-    <item android:id="@android:id/background">
+-        <shape android:shape="rectangle">
+-            <solid android:color="#33000000" />
+-            <corners android:radius="4dp" />
+-        </shape>
+-    </item>
+-    <item android:id="@android:id/progress">
+-        <clip>
+-            <shape android:shape="rectangle">
+-                <solid android:color="#E2661F" />
+-                <corners android:radius="4dp" />
+-            </shape>
+-        </clip>
+-    </item>
+-</layer-list>
+diff --git a/android_overrides/widget/drawable/widget_row_bg_dark.xml b/android_overrides/widget/drawable/widget_row_bg_dark.xml
+new file mode 100644
+index 0000000..5aa65b5
+--- /dev/null
++++ b/android_overrides/widget/drawable/widget_row_bg_dark.xml
+@@ -0,0 +1,6 @@
++<?xml version="1.0" encoding="utf-8"?>
++<shape xmlns:android="http://schemas.android.com/apk/res/android"
++    android:shape="rectangle">
++    <solid android:color="#26FFFFFF" />
++    <corners android:radius="12dp" />
++</shape>
+diff --git a/android_overrides/widget/drawable/widget_row_bg_light.xml b/android_overrides/widget/drawable/widget_row_bg_light.xml
+new file mode 100644
+index 0000000..5cd7d74
+--- /dev/null
++++ b/android_overrides/widget/drawable/widget_row_bg_light.xml
+@@ -0,0 +1,6 @@
++<?xml version="1.0" encoding="utf-8"?>
++<shape xmlns:android="http://schemas.android.com/apk/res/android"
++    android:shape="rectangle">
++    <solid android:color="#14000000" />
++    <corners android:radius="12dp" />
++</shape>
+diff --git a/android_overrides/widget/drawable/widget_seg.xml b/android_overrides/widget/drawable/widget_seg.xml
+new file mode 100644
+index 0000000..fc9cd86
+--- /dev/null
++++ b/android_overrides/widget/drawable/widget_seg.xml
+@@ -0,0 +1,10 @@
++<?xml version="1.0" encoding="utf-8"?>
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++    android:width="24dp"
++    android:height="8dp"
++    android:viewportWidth="24"
++    android:viewportHeight="8">
++    <path
++        android:fillColor="#FFFFFFFF"
++        android:pathData="M4,0h16a4,4 0 0,1 0,8h-16a4,4 0 0,1 0,-8z" />
++</vector>
+diff --git a/android_overrides/widget/layout/habits_widget.xml b/android_overrides/widget/layout/habits_widget.xml
+index a90e8ee..7100605 100644
+--- a/android_overrides/widget/layout/habits_widget.xml
++++ b/android_overrides/widget/layout/habits_widget.xml
+@@ -1,60 +1,71 @@
+ <?xml version="1.0" encoding="utf-8"?>
+-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
++<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+     android:id="@+id/widget_root"
+     android:layout_width="match_parent"
+-    android:layout_height="match_parent"
+-    android:orientation="vertical"
+-    android:background="@drawable/widget_bg_dusk"
+-    android:padding="12dp">
++    android:layout_height="match_parent">
++
++    <ImageView
++        android:id="@+id/widget_bg"
++        android:layout_width="match_parent"
++        android:layout_height="match_parent"
++        android:scaleType="fitXY"
++        android:src="@drawable/widget_bg_dusk" />
+ 
+     <LinearLayout
+         android:layout_width="match_parent"
+-        android:layout_height="wrap_content"
+-        android:gravity="center_vertical"
+-        android:orientation="horizontal">
++        android:layout_height="match_parent"
++        android:orientation="vertical"
++        android:padding="14dp">
+ 
+         <LinearLayout
+-            android:id="@+id/widget_head"
+-            android:layout_width="0dp"
++            android:layout_width="match_parent"
+             android:layout_height="wrap_content"
+-            android:layout_weight="1"
+-            android:orientation="vertical">
++            android:gravity="center_vertical"
++            android:orientation="horizontal">
+ 
+-            <TextView
+-                android:id="@+id/widget_title"
+-                android:layout_width="match_parent"
++            <LinearLayout
++                android:id="@+id/widget_head"
++                android:layout_width="0dp"
+                 android:layout_height="wrap_content"
+-                android:maxLines="1"
+-                android:text="Prakriyā"
+-                android:textColor="#F2B93B"
+-                android:textSize="14sp"
+-                android:textStyle="bold" />
++                android:layout_weight="1"
++                android:orientation="vertical">
++
++                <TextView
++                    android:id="@+id/widget_title"
++                    android:layout_width="match_parent"
++                    android:layout_height="wrap_content"
++                    android:ellipsize="end"
++                    android:maxLines="1"
++                    android:text="Prakriyā"
++                    android:textColor="#F2B93B"
++                    android:textSize="15sp"
++                    android:textStyle="bold" />
++
++                <TextView
++                    android:id="@+id/widget_date"
++                    android:layout_width="match_parent"
++                    android:layout_height="wrap_content"
++                    android:maxLines="1"
++                    android:textColor="#B4A8DA"
++                    android:textSize="11sp" />
++            </LinearLayout>
+ 
+             <TextView
+-                android:id="@+id/widget_date"
+-                android:layout_width="match_parent"
+-                android:layout_height="wrap_content"
+-                android:maxLines="1"
+-                android:textColor="#A99BD0"
+-                android:textSize="10sp" />
++                android:id="@+id/widget_add"
++                android:layout_width="36dp"
++                android:layout_height="36dp"
++                android:gravity="center"
++                android:text="+"
++                android:textColor="#F2B93B"
++                android:textSize="26sp"
++                android:textStyle="bold" />
+         </LinearLayout>
+ 
+-        <TextView
+-            android:id="@+id/widget_add"
+-            android:layout_width="34dp"
+-            android:layout_height="34dp"
+-            android:gravity="center"
+-            android:text="+"
+-            android:textColor="#F2B93B"
+-            android:textSize="24sp"
+-            android:textStyle="bold" />
++        <LinearLayout
++            android:id="@+id/widget_content"
++            android:layout_width="match_parent"
++            android:layout_height="wrap_content"
++            android:layout_marginTop="6dp"
++            android:orientation="vertical" />
+     </LinearLayout>
+-
+-    <LinearLayout
+-        android:id="@+id/widget_content"
+-        android:layout_width="match_parent"
+-        android:layout_height="wrap_content"
+-        android:layout_marginTop="6dp"
+-        android:orientation="vertical" />
+-
+-</LinearLayout>
++</FrameLayout>
+diff --git a/android_overrides/widget/layout/widget_block_header.xml b/android_overrides/widget/layout/widget_block_header.xml
+index a6e9b28..3d9d983 100644
+--- a/android_overrides/widget/layout/widget_block_header.xml
++++ b/android_overrides/widget/layout/widget_block_header.xml
+@@ -2,7 +2,7 @@
+ <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+     android:layout_width="match_parent"
+     android:layout_height="wrap_content"
+-    android:layout_marginTop="8dp"
++    android:layout_marginTop="10dp"
+     android:orientation="horizontal">
+ 
+     <TextView
+@@ -11,8 +11,8 @@
+         android:layout_height="wrap_content"
+         android:layout_weight="1"
+         android:maxLines="1"
+-        android:textColor="#A99BD0"
+-        android:textSize="10sp"
++        android:textColor="#B4A8DA"
++        android:textSize="12sp"
+         android:textStyle="bold" />
+ 
+     <TextView
+@@ -20,6 +20,6 @@
+         android:layout_width="wrap_content"
+         android:layout_height="wrap_content"
+         android:maxLines="1"
+-        android:textColor="#A99BD0"
+-        android:textSize="10sp" />
++        android:textColor="#B4A8DA"
++        android:textSize="12sp" />
+ </LinearLayout>
+diff --git a/android_overrides/widget/layout/widget_block_progress.xml b/android_overrides/widget/layout/widget_block_progress.xml
+index 53e2b61..2f97227 100644
+--- a/android_overrides/widget/layout/widget_block_progress.xml
++++ b/android_overrides/widget/layout/widget_block_progress.xml
+@@ -2,7 +2,7 @@
+ <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+     android:layout_width="match_parent"
+     android:layout_height="wrap_content"
+-    android:layout_marginTop="6dp"
++    android:layout_marginTop="8dp"
+     android:orientation="vertical">
+ 
+     <TextView
+@@ -10,50 +10,105 @@
+         android:layout_width="match_parent"
+         android:layout_height="wrap_content"
+         android:maxLines="1"
+-        android:textColor="#A99BD0"
+-        android:textSize="11sp" />
++        android:textColor="#B4A8DA"
++        android:textSize="12sp" />
+ 
+-    <ProgressBar
+-        android:id="@+id/progress_dusk"
+-        style="?android:attr/progressBarStyleHorizontal"
++    <LinearLayout
+         android:layout_width="match_parent"
+-        android:layout_height="6dp"
+-        android:layout_marginTop="4dp"
+-        android:max="100"
+-        android:progress="0"
+-        android:progressDrawable="@drawable/widget_progress_dusk" />
+-
+-    <ProgressBar
+-        android:id="@+id/progress_sunrise"
+-        style="?android:attr/progressBarStyleHorizontal"
+-        android:layout_width="match_parent"
+-        android:layout_height="6dp"
+-        android:layout_marginTop="4dp"
+-        android:max="100"
+-        android:progress="0"
+-        android:progressDrawable="@drawable/widget_progress_sunrise"
+-        android:visibility="gone" />
+-
+-    <ProgressBar
+-        android:id="@+id/progress_forest"
+-        style="?android:attr/progressBarStyleHorizontal"
+-        android:layout_width="match_parent"
+-        android:layout_height="6dp"
+-        android:layout_marginTop="4dp"
+-        android:max="100"
+-        android:progress="0"
+-        android:progressDrawable="@drawable/widget_progress_forest"
+-        android:visibility="gone" />
+-
+-    <ProgressBar
+-        android:id="@+id/progress_paper"
+-        style="?android:attr/progressBarStyleHorizontal"
+-        android:layout_width="match_parent"
+-        android:layout_height="6dp"
+-        android:layout_marginTop="4dp"
+-        android:max="100"
+-        android:progress="0"
+-        android:progressDrawable="@drawable/widget_progress_paper"
+-        android:visibility="gone" />
+-
++        android:layout_height="wrap_content"
++        android:layout_marginTop="5dp"
++        android:layout_marginStart="-1.5dp"
++        android:layout_marginEnd="-1.5dp"
++        android:orientation="horizontal">
++        <ImageView
++            android:id="@+id/seg1"
++            android:layout_width="0dp"
++            android:layout_height="7dp"
++            android:layout_marginStart="1.5dp"
++            android:layout_marginEnd="1.5dp"
++            android:layout_weight="1"
++            android:scaleType="fitXY"
++            android:src="@drawable/widget_seg" />
++        <ImageView
++            android:id="@+id/seg2"
++            android:layout_width="0dp"
++            android:layout_height="7dp"
++            android:layout_marginStart="1.5dp"
++            android:layout_marginEnd="1.5dp"
++            android:layout_weight="1"
++            android:scaleType="fitXY"
++            android:src="@drawable/widget_seg" />
++        <ImageView
++            android:id="@+id/seg3"
++            android:layout_width="0dp"
++            android:layout_height="7dp"
++            android:layout_marginStart="1.5dp"
++            android:layout_marginEnd="1.5dp"
++            android:layout_weight="1"
++            android:scaleType="fitXY"
++            android:src="@drawable/widget_seg" />
++        <ImageView
++            android:id="@+id/seg4"
++            android:layout_width="0dp"
++            android:layout_height="7dp"
++            android:layout_marginStart="1.5dp"
++            android:layout_marginEnd="1.5dp"
++            android:layout_weight="1"
++            android:scaleType="fitXY"
++            android:src="@drawable/widget_seg" />
++        <ImageView
++            android:id="@+id/seg5"
++            android:layout_width="0dp"
++            android:layout_height="7dp"
++            android:layout_marginStart="1.5dp"
++            android:layout_marginEnd="1.5dp"
++            android:layout_weight="1"
++            android:scaleType="fitXY"
++            android:src="@drawable/widget_seg" />
++        <ImageView
++            android:id="@+id/seg6"
++            android:layout_width="0dp"
++            android:layout_height="7dp"
++            android:layout_marginStart="1.5dp"
++            android:layout_marginEnd="1.5dp"
++            android:layout_weight="1"
++            android:scaleType="fitXY"
++            android:src="@drawable/widget_seg" />
++        <ImageView
++            android:id="@+id/seg7"
++            android:layout_width="0dp"
++            android:layout_height="7dp"
++            android:layout_marginStart="1.5dp"
++            android:layout_marginEnd="1.5dp"
++            android:layout_weight="1"
++            android:scaleType="fitXY"
++            android:src="@drawable/widget_seg" />
++        <ImageView
++            android:id="@+id/seg8"
++            android:layout_width="0dp"
++            android:layout_height="7dp"
++            android:layout_marginStart="1.5dp"
++            android:layout_marginEnd="1.5dp"
++            android:layout_weight="1"
++            android:scaleType="fitXY"
++            android:src="@drawable/widget_seg" />
++        <ImageView
++            android:id="@+id/seg9"
++            android:layout_width="0dp"
++            android:layout_height="7dp"
++            android:layout_marginStart="1.5dp"
++            android:layout_marginEnd="1.5dp"
++            android:layout_weight="1"
++            android:scaleType="fitXY"
++            android:src="@drawable/widget_seg" />
++        <ImageView
++            android:id="@+id/seg10"
++            android:layout_width="0dp"
++            android:layout_height="7dp"
++            android:layout_marginStart="1.5dp"
++            android:layout_marginEnd="1.5dp"
++            android:layout_weight="1"
++            android:scaleType="fitXY"
++            android:src="@drawable/widget_seg" />
++    </LinearLayout>
+ </LinearLayout>
+diff --git a/android_overrides/widget/layout/widget_block_stats.xml b/android_overrides/widget/layout/widget_block_stats.xml
+index 2dacb77..af34635 100644
+--- a/android_overrides/widget/layout/widget_block_stats.xml
++++ b/android_overrides/widget/layout/widget_block_stats.xml
+@@ -17,15 +17,15 @@
+             android:layout_height="wrap_content"
+             android:maxLines="1"
+             android:textColor="#F4EEFF"
+-            android:textSize="18sp"
++            android:textSize="20sp"
+             android:textStyle="bold" />
+         <TextView
+             android:id="@+id/stat_l1"
+             android:layout_width="match_parent"
+             android:layout_height="wrap_content"
+             android:maxLines="1"
+-            android:textColor="#A99BD0"
+-            android:textSize="10sp" />
++            android:textColor="#B4A8DA"
++            android:textSize="11sp" />
+     </LinearLayout>
+ 
+     <LinearLayout
+@@ -40,15 +40,15 @@
+             android:layout_height="wrap_content"
+             android:maxLines="1"
+             android:textColor="#F4EEFF"
+-            android:textSize="18sp"
++            android:textSize="20sp"
+             android:textStyle="bold" />
+         <TextView
+             android:id="@+id/stat_l2"
+             android:layout_width="match_parent"
+             android:layout_height="wrap_content"
+             android:maxLines="1"
+-            android:textColor="#A99BD0"
+-            android:textSize="10sp" />
++            android:textColor="#B4A8DA"
++            android:textSize="11sp" />
+     </LinearLayout>
+ 
+     <LinearLayout
+@@ -63,15 +63,15 @@
+             android:layout_height="wrap_content"
+             android:maxLines="1"
+             android:textColor="#F4EEFF"
+-            android:textSize="18sp"
++            android:textSize="20sp"
+             android:textStyle="bold" />
+         <TextView
+             android:id="@+id/stat_l3"
+             android:layout_width="match_parent"
+             android:layout_height="wrap_content"
+             android:maxLines="1"
+-            android:textColor="#A99BD0"
+-            android:textSize="10sp" />
++            android:textColor="#B4A8DA"
++            android:textSize="11sp" />
+     </LinearLayout>
+ 
+     <LinearLayout
+@@ -86,14 +86,14 @@
+             android:layout_height="wrap_content"
+             android:maxLines="1"
+             android:textColor="#F4EEFF"
+-            android:textSize="18sp"
++            android:textSize="20sp"
+             android:textStyle="bold" />
+         <TextView
+             android:id="@+id/stat_l4"
+             android:layout_width="match_parent"
+             android:layout_height="wrap_content"
+             android:maxLines="1"
+-            android:textColor="#A99BD0"
+-            android:textSize="10sp" />
++            android:textColor="#B4A8DA"
++            android:textSize="11sp" />
+     </LinearLayout>
+ </LinearLayout>
+diff --git a/android_overrides/widget/layout/widget_block_water.xml b/android_overrides/widget/layout/widget_block_water.xml
+new file mode 100644
+index 0000000..3fdef14
+--- /dev/null
++++ b/android_overrides/widget/layout/widget_block_water.xml
+@@ -0,0 +1,42 @@
++<?xml version="1.0" encoding="utf-8"?>
++<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
++    android:id="@+id/water_root"
++    android:layout_width="match_parent"
++    android:layout_height="wrap_content"
++    android:layout_marginTop="8dp"
++    android:gravity="center_vertical"
++    android:orientation="horizontal">
++
++    <TextView
++        android:id="@+id/water_minus"
++        android:layout_width="44dp"
++        android:layout_height="36dp"
++        android:background="@drawable/widget_row_bg_dark"
++        android:gravity="center"
++        android:text="−"
++        android:textColor="#F4EEFF"
++        android:textSize="22sp"
++        android:textStyle="bold" />
++
++    <TextView
++        android:id="@+id/water_label"
++        android:layout_width="0dp"
++        android:layout_height="wrap_content"
++        android:layout_weight="1"
++        android:gravity="center"
++        android:maxLines="1"
++        android:textColor="#F4EEFF"
++        android:textSize="14sp"
++        android:textStyle="bold" />
++
++    <TextView
++        android:id="@+id/water_plus"
++        android:layout_width="44dp"
++        android:layout_height="36dp"
++        android:background="@drawable/widget_row_bg_dark"
++        android:gravity="center"
++        android:text="+"
++        android:textColor="#F4EEFF"
++        android:textSize="22sp"
++        android:textStyle="bold" />
++</LinearLayout>
+diff --git a/android_overrides/widget/layout/widget_block_week.xml b/android_overrides/widget/layout/widget_block_week.xml
+new file mode 100644
+index 0000000..472201e
+--- /dev/null
++++ b/android_overrides/widget/layout/widget_block_week.xml
+@@ -0,0 +1,154 @@
++<?xml version="1.0" encoding="utf-8"?>
++<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
++    android:layout_width="match_parent"
++    android:layout_height="wrap_content"
++    android:layout_marginTop="10dp"
++    android:orientation="horizontal">
++        <LinearLayout
++            android:layout_width="0dp"
++            android:layout_height="wrap_content"
++            android:layout_weight="1"
++            android:gravity="center_horizontal"
++            android:orientation="vertical">
++            <TextView
++                android:id="@+id/wk_l1"
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                android:textColor="#B4A8DA"
++                android:textSize="11sp"
++                android:textStyle="bold" />
++            <ImageView
++                android:id="@+id/wk_d1"
++                android:layout_width="20dp"
++                android:layout_height="20dp"
++                android:layout_marginTop="2dp"
++                android:scaleType="fitXY"
++                android:src="@drawable/widget_dot" />
++        </LinearLayout>
++        <LinearLayout
++            android:layout_width="0dp"
++            android:layout_height="wrap_content"
++            android:layout_weight="1"
++            android:gravity="center_horizontal"
++            android:orientation="vertical">
++            <TextView
++                android:id="@+id/wk_l2"
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                android:textColor="#B4A8DA"
++                android:textSize="11sp"
++                android:textStyle="bold" />
++            <ImageView
++                android:id="@+id/wk_d2"
++                android:layout_width="20dp"
++                android:layout_height="20dp"
++                android:layout_marginTop="2dp"
++                android:scaleType="fitXY"
++                android:src="@drawable/widget_dot" />
++        </LinearLayout>
++        <LinearLayout
++            android:layout_width="0dp"
++            android:layout_height="wrap_content"
++            android:layout_weight="1"
++            android:gravity="center_horizontal"
++            android:orientation="vertical">
++            <TextView
++                android:id="@+id/wk_l3"
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                android:textColor="#B4A8DA"
++                android:textSize="11sp"
++                android:textStyle="bold" />
++            <ImageView
++                android:id="@+id/wk_d3"
++                android:layout_width="20dp"
++                android:layout_height="20dp"
++                android:layout_marginTop="2dp"
++                android:scaleType="fitXY"
++                android:src="@drawable/widget_dot" />
++        </LinearLayout>
++        <LinearLayout
++            android:layout_width="0dp"
++            android:layout_height="wrap_content"
++            android:layout_weight="1"
++            android:gravity="center_horizontal"
++            android:orientation="vertical">
++            <TextView
++                android:id="@+id/wk_l4"
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                android:textColor="#B4A8DA"
++                android:textSize="11sp"
++                android:textStyle="bold" />
++            <ImageView
++                android:id="@+id/wk_d4"
++                android:layout_width="20dp"
++                android:layout_height="20dp"
++                android:layout_marginTop="2dp"
++                android:scaleType="fitXY"
++                android:src="@drawable/widget_dot" />
++        </LinearLayout>
++        <LinearLayout
++            android:layout_width="0dp"
++            android:layout_height="wrap_content"
++            android:layout_weight="1"
++            android:gravity="center_horizontal"
++            android:orientation="vertical">
++            <TextView
++                android:id="@+id/wk_l5"
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                android:textColor="#B4A8DA"
++                android:textSize="11sp"
++                android:textStyle="bold" />
++            <ImageView
++                android:id="@+id/wk_d5"
++                android:layout_width="20dp"
++                android:layout_height="20dp"
++                android:layout_marginTop="2dp"
++                android:scaleType="fitXY"
++                android:src="@drawable/widget_dot" />
++        </LinearLayout>
++        <LinearLayout
++            android:layout_width="0dp"
++            android:layout_height="wrap_content"
++            android:layout_weight="1"
++            android:gravity="center_horizontal"
++            android:orientation="vertical">
++            <TextView
++                android:id="@+id/wk_l6"
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                android:textColor="#B4A8DA"
++                android:textSize="11sp"
++                android:textStyle="bold" />
++            <ImageView
++                android:id="@+id/wk_d6"
++                android:layout_width="20dp"
++                android:layout_height="20dp"
++                android:layout_marginTop="2dp"
++                android:scaleType="fitXY"
++                android:src="@drawable/widget_dot" />
++        </LinearLayout>
++        <LinearLayout
++            android:layout_width="0dp"
++            android:layout_height="wrap_content"
++            android:layout_weight="1"
++            android:gravity="center_horizontal"
++            android:orientation="vertical">
++            <TextView
++                android:id="@+id/wk_l7"
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                android:textColor="#B4A8DA"
++                android:textSize="11sp"
++                android:textStyle="bold" />
++            <ImageView
++                android:id="@+id/wk_d7"
++                android:layout_width="20dp"
++                android:layout_height="20dp"
++                android:layout_marginTop="2dp"
++                android:scaleType="fitXY"
++                android:src="@drawable/widget_dot" />
++        </LinearLayout>
++</LinearLayout>
+diff --git a/android_overrides/widget/layout/widget_row.xml b/android_overrides/widget/layout/widget_row.xml
+index 2aa2e78..09d5f51 100644
+--- a/android_overrides/widget/layout/widget_row.xml
++++ b/android_overrides/widget/layout/widget_row.xml
+@@ -1,29 +1,32 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
++    android:id="@+id/row_root"
+     android:layout_width="match_parent"
+     android:layout_height="wrap_content"
++    android:layout_marginTop="4dp"
++    android:background="@drawable/widget_row_bg_dark"
+     android:gravity="center_vertical"
+-    android:orientation="horizontal">
++    android:orientation="horizontal"
++    android:paddingStart="10dp"
++    android:paddingTop="6dp"
++    android:paddingEnd="10dp"
++    android:paddingBottom="6dp">
+ 
+     <ImageView
+         android:id="@+id/row_mark"
+-        android:layout_width="36dp"
+-        android:layout_height="26dp"
+-        android:paddingStart="2dp"
+-        android:paddingTop="4dp"
++        android:layout_width="30dp"
++        android:layout_height="24dp"
+         android:paddingEnd="8dp"
+-        android:paddingBottom="4dp"
+         android:scaleType="centerInside"
+         android:src="@drawable/widget_check_off" />
+ 
+     <TextView
+         android:id="@+id/row_text"
+         android:layout_width="0dp"
+-        android:layout_height="26dp"
++        android:layout_height="wrap_content"
+         android:layout_weight="1"
+         android:ellipsize="end"
+-        android:gravity="center_vertical"
+         android:maxLines="1"
+         android:textColor="#F4EEFF"
+-        android:textSize="13sp" />
++        android:textSize="14sp" />
+ </LinearLayout>
+diff --git a/lib/screens/widget_studio_screen.dart b/lib/screens/widget_studio_screen.dart
+index 19333e6..91f933e 100644
+--- a/lib/screens/widget_studio_screen.dart
++++ b/lib/screens/widget_studio_screen.dart
+@@ -147,6 +147,71 @@ class _WidgetStudioScreenState extends State<WidgetStudioScreen> {
+     );
+   }
+ 
++  void _applyPreset(WidgetPreset p) {
++    final rest = kWidgetBlockKeys.where((k) => !p.on.contains(k));
++    extras.applyWidgetLayout(
++      order: <String>[...p.on, ...rest],
++      off: <String>[for (final k in kWidgetBlockKeys) if (!p.on.contains(k)) k],
++      stats: p.stats,
++    );
++  }
++
++  Widget _title(String text, bool dark, {String? hint}) => Padding(
++        padding: const EdgeInsets.only(top: 24, bottom: 10),
++        child: Column(
++          crossAxisAlignment: CrossAxisAlignment.start,
++          children: [
++            Text(text, style: label(Surfaces.muted(dark))),
++            if (hint != null) ...[
++              const SizedBox(height: 4),
++              Text(hint, style: body(11.5, Surfaces.muted(dark))),
++            ],
++          ],
++        ),
++      );
++
++  Widget _switchRow(bool dark, String title, String hint, bool value,
++          ValueChanged<bool> onChanged) =>
++      Padding(
++        padding: const EdgeInsets.symmetric(vertical: 4),
++        child: Row(
++          children: [
++            Expanded(
++              child: Column(
++                crossAxisAlignment: CrossAxisAlignment.start,
++                children: [
++                  Text(title,
++                      style: body(13.5, Surfaces.bodyText(dark),
++                          weight: FontWeight.w600)),
++                  Text(hint, style: body(11, Surfaces.muted(dark))),
++                ],
++              ),
++            ),
++            Switch(
++              value: value,
++              activeTrackColor: Surfaces.accent(dark),
++              onChanged: onChanged,
++            ),
++          ],
++        ),
++      );
++
++  Widget _chips(List<(String, String)> options, String current,
++      ValueChanged<String> onPick) {
++    return Wrap(
++      spacing: 8,
++      runSpacing: 8,
++      children: [
++        for (final o in options)
++          _HabitChip(
++            name: o.$2,
++            selected: current == o.$1,
++            onTap: () => onPick(o.$1),
++          ),
++      ],
++    );
++  }
++
+   @override
+   Widget build(BuildContext context) {
+     final dark = Theme.of(context).brightness == Brightness.dark;
+@@ -161,6 +226,9 @@ class _WidgetStudioScreenState extends State<WidgetStudioScreen> {
+               final habits = store.habits;
+               final habitsOn = extras.widgetBlockOn('habits');
+               final statsOn = extras.widgetBlockOn('stats');
++              final waterOn = extras.widgetBlockOn('water');
++              final listOn =
++                  extras.widgetBlockOn('tasks') || extras.widgetBlockOn('habits');
+               return Column(
+                 children: [
+                   const ScreenHeader(
+@@ -205,13 +273,47 @@ class _WidgetStudioScreenState extends State<WidgetStudioScreen> {
+                                 textAlign: TextAlign.center,
+                                 style: body(11.5, Surfaces.muted(dark))),
+                           ),
+-                        const SizedBox(height: 24),
+-                        Text('WHAT SHOWS, AND IN WHAT ORDER',
+-                            style: label(Surfaces.muted(dark))),
+-                        const SizedBox(height: 6),
+-                        Text('Switch blocks on or off. Press and drag the handle to reorder.',
+-                            style: body(11.5, Surfaces.muted(dark))),
+-                        const SizedBox(height: 10),
++                        _title('QUICK LAYOUTS', dark,
++                            hint: 'One tap sets the blocks and stats. Fine-tune below.'),
++                        SizedBox(
++                          height: 74,
++                          child: ListView.separated(
++                            scrollDirection: Axis.horizontal,
++                            itemCount: kWidgetPresets.length,
++                            separatorBuilder: (_, __) => const SizedBox(width: 10),
++                            itemBuilder: (_, i) {
++                              final p = kWidgetPresets[i];
++                              return InkWell(
++                                borderRadius: BorderRadius.circular(16),
++                                onTap: () => _applyPreset(p),
++                                child: Container(
++                                  width: 168,
++                                  padding: const EdgeInsets.all(12),
++                                  decoration: BoxDecoration(
++                                    borderRadius: BorderRadius.circular(16),
++                                    border: Border.all(
++                                        color: Surfaces.accentBorder(dark)),
++                                  ),
++                                  child: Column(
++                                    crossAxisAlignment: CrossAxisAlignment.start,
++                                    children: [
++                                      Text(p.name,
++                                          style: body(13, Surfaces.heading(dark),
++                                              weight: FontWeight.w700)),
++                                      const SizedBox(height: 2),
++                                      Text(p.blurb,
++                                          maxLines: 2,
++                                          overflow: TextOverflow.ellipsis,
++                                          style: body(11, Surfaces.muted(dark))),
++                                    ],
++                                  ),
++                                ),
++                              );
++                            },
++                          ),
++                        ),
++                        _title('WHAT SHOWS, AND IN WHAT ORDER', dark,
++                            hint: 'Switch blocks on or off. Press and drag the handle to reorder.'),
+                         ModuleCard(
+                           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                           child: ReorderableListView(
+@@ -239,12 +341,7 @@ class _WidgetStudioScreenState extends State<WidgetStudioScreen> {
+                           ),
+                         ),
+                         if (statsOn) ...[
+-                          const SizedBox(height: 24),
+-                          Text('DASHBOARD STATS', style: label(Surfaces.muted(dark))),
+-                          const SizedBox(height: 6),
+-                          Text('Pick up to four.',
+-                              style: body(11.5, Surfaces.muted(dark))),
+-                          const SizedBox(height: 10),
++                          _title('DASHBOARD STATS', dark, hint: 'Pick up to four.'),
+                           Wrap(
+                             spacing: 8,
+                             runSpacing: 8,
+@@ -258,32 +355,35 @@ class _WidgetStudioScreenState extends State<WidgetStudioScreen> {
+                             ],
+                           ),
+                         ],
+-                        if (extras.widgetBlockOn('tasks')) ...[
+-                          const SizedBox(height: 24),
++                        if (waterOn) ...[
++                          _title('WATER GOAL', dark,
++                              hint: 'Glasses a day. Use - and + on the widget to log.'),
+                           ModuleCard(
+                             child: Row(
+                               children: [
++                                IconButton(
++                                  onPressed: () => extras.setWidgetContent(
++                                      waterGoal: extras.widgetWaterGoal - 1),
++                                  icon: const Icon(Icons.remove_circle_outline),
++                                ),
+                                 Expanded(
+-                                  child: Text('Keep finished tasks in the list',
+-                                      style: body(13.5, Surfaces.bodyText(dark),
+-                                          weight: FontWeight.w500)),
++                                  child: Text('${extras.widgetWaterGoal} glasses',
++                                      textAlign: TextAlign.center,
++                                      style: body(14, Surfaces.heading(dark),
++                                          weight: FontWeight.w700)),
+                                 ),
+-                                Switch(
+-                                  value: extras.widgetShowDoneTasks,
+-                                  activeTrackColor: Surfaces.accent(dark),
+-                                  onChanged: extras.setWidgetShowDoneTasks,
++                                IconButton(
++                                  onPressed: () => extras.setWidgetContent(
++                                      waterGoal: extras.widgetWaterGoal + 1),
++                                  icon: const Icon(Icons.add_circle_outline),
+                                 ),
+                               ],
+                             ),
+                           ),
+                         ],
+                         if (habitsOn && habits.isNotEmpty) ...[
+-                          const SizedBox(height: 24),
+-                          Text('WHICH HABITS', style: label(Surfaces.muted(dark))),
+-                          const SizedBox(height: 6),
+-                          Text('Tap to include or leave out a habit.',
+-                              style: body(11.5, Surfaces.muted(dark))),
+-                          const SizedBox(height: 10),
++                          _title('WHICH HABITS', dark,
++                              hint: 'Tap to include or leave out a habit.'),
+                           Wrap(
+                             spacing: 8,
+                             runSpacing: 8,
+@@ -297,20 +397,149 @@ class _WidgetStudioScreenState extends State<WidgetStudioScreen> {
+                             ],
+                           ),
+                         ],
+-                        const SizedBox(height: 24),
+-                        Text('LOOK', style: label(Surfaces.muted(dark))),
+-                        const SizedBox(height: 10),
+-                        Row(
+-                          children: [
+-                            for (final option in kWidgetStyles)
+-                              Expanded(
++                        if (listOn) ...[
++                          _title('LISTS', dark,
++                              hint: 'Make your tasks and habits easy to read and tick.'),
++                          ModuleCard(
++                            child: Column(
++                              crossAxisAlignment: CrossAxisAlignment.start,
++                              children: [
++                                if (extras.widgetBlockOn('tasks'))
++                                  _switchRow(
++                                      dark,
++                                      'Keep finished tasks in the list',
++                                      'Finished tasks sit below the open ones',
++                                      extras.widgetShowDoneTasks,
++                                      extras.setWidgetShowDoneTasks),
++                                const SizedBox(height: 8),
++                                Text('Tapping a row',
++                                    style: body(12.5, Surfaces.bodyText(dark),
++                                        weight: FontWeight.w600)),
++                                const SizedBox(height: 8),
++                                _chips(const [
++                                  ('open', 'Opens the app'),
++                                  ('tick', 'Ticks it off'),
++                                ], extras.widgetRowTap,
++                                    (v) => extras.setWidgetContent(rowTap: v)),
++                                const SizedBox(height: 14),
++                                Text('Rows to show',
++                                    style: body(12.5, Surfaces.bodyText(dark),
++                                        weight: FontWeight.w600)),
++                                const SizedBox(height: 8),
++                                _chips(const [
++                                  ('0', 'Fit the widget'),
++                                  ('3', '3'),
++                                  ('5', '5'),
++                                  ('8', '8'),
++                                ], '${extras.widgetMaxRows}',
++                                    (v) => extras.setWidgetContent(
++                                        maxRows: int.tryParse(v) ?? 0)),
++                              ],
++                            ),
++                          ),
++                        ],
++                        _title('LOOK', dark),
++                        SizedBox(
++                          height: 96,
++                          child: ListView.separated(
++                            scrollDirection: Axis.horizontal,
++                            itemCount: kWidgetStyles.length,
++                            separatorBuilder: (_, __) => const SizedBox(width: 6),
++                            itemBuilder: (_, i) {
++                              final option = kWidgetStyles[i];
++                              return SizedBox(
++                                width: 84,
+                                 child: _StyleSwatch(
+                                   option: option,
+                                   selected: extras.widgetStyle == option.key,
+                                   onTap: () => extras.setWidgetStyle(option.key),
+                                 ),
++                              );
++                            },
++                          ),
++                        ),
++                        const SizedBox(height: 12),
++                        ModuleCard(
++                          child: Column(
++                            crossAxisAlignment: CrossAxisAlignment.start,
++                            children: [
++                              Text('Accent colour',
++                                  style: body(12.5, Surfaces.bodyText(dark),
++                                      weight: FontWeight.w600)),
++                              const SizedBox(height: 10),
++                              Wrap(
++                                spacing: 10,
++                                runSpacing: 10,
++                                children: [
++                                  for (final a in kWidgetAccents)
++                                    _AccentDot(
++                                      label: a.$2,
++                                      color: a.$3 == 0 ? null : Color(a.$3),
++                                      selected: extras.widgetAccent == a.$1 ||
++                                          (a.$1 == 'auto' &&
++                                              extras.widgetAccent.isEmpty),
++                                      onTap: () => extras.setWidgetLook(
++                                          accent: a.$1 == 'auto' ? '' : a.$1),
++                                    ),
++                                ],
++                              ),
++                              const SizedBox(height: 16),
++                              Text('Background opacity  ${extras.widgetOpacity}%',
++                                  style: body(12.5, Surfaces.bodyText(dark),
++                                      weight: FontWeight.w600)),
++                              Slider(
++                                value: extras.widgetOpacity.toDouble(),
++                                min: 30,
++                                max: 100,
++                                divisions: 14,
++                                activeColor: Surfaces.accent(dark),
++                                onChanged: (v) =>
++                                    extras.setWidgetLook(opacity: v.round()),
+                               ),
+-                          ],
++                              Text('Text size',
++                                  style: body(12.5, Surfaces.bodyText(dark),
++                                      weight: FontWeight.w600)),
++                              const SizedBox(height: 8),
++                              _chips(const [
++                                ('small', 'Small'),
++                                ('medium', 'Medium'),
++                                ('large', 'Large'),
++                              ], extras.widgetTextSize,
++                                  (v) => extras.setWidgetLook(textSize: v)),
++                              const SizedBox(height: 8),
++                              _switchRow(
++                                  dark,
++                                  'Compact rows',
++                                  'Tighter spacing so more rows fit',
++                                  extras.widgetCompact,
++                                  (v) => extras.setWidgetLook(compact: v)),
++                            ],
++                          ),
++                        ),
++                        _title('HEADER', dark),
++                        ModuleCard(
++                          child: Column(
++                            crossAxisAlignment: CrossAxisAlignment.start,
++                            children: [
++                              Text('Title',
++                                  style: body(12.5, Surfaces.bodyText(dark),
++                                      weight: FontWeight.w600)),
++                              const SizedBox(height: 8),
++                              _chips(const [
++                                ('app', 'Prakriyā'),
++                                ('greeting', 'Greeting'),
++                                ('day', 'Today'),
++                              ], extras.widgetTitleMode,
++                                  (v) => extras.setWidgetContent(titleMode: v)),
++                              const SizedBox(height: 8),
++                              _switchRow(
++                                  dark,
++                                  'Show the date',
++                                  'Weekday and date under the title',
++                                  extras.widgetShowDate,
++                                  (v) => extras.setWidgetContent(showDate: v)),
++                            ],
++                          ),
+                         ),
+                         const SizedBox(height: 24),
+                         ModuleCard(
+@@ -322,7 +551,7 @@ class _WidgetStudioScreenState extends State<WidgetStudioScreen> {
+                                       weight: FontWeight.w700)),
+                               const SizedBox(height: 8),
+                               Text(
+-                                  'On the widget, tap a circle to tick a task or habit. Tap a title to open your list. Tap + to add a task. Ticks are saved to the app the next time it opens. A taller widget shows more rows. It refreshes whenever you change something here, and about every 30 minutes on its own.',
++                                  'On the widget, tap a circle to tick a task or habit, and - or + to log water. Tap the title to open the app. Tap + to add a task. It moves to the new day by itself at midnight, and ticks are saved to the app the next time it opens. A taller widget shows more rows.',
+                                   style: body(12.5, Surfaces.muted(dark))
+                                       .copyWith(height: 1.45)),
+                               const SizedBox(height: 10),
+@@ -473,7 +702,7 @@ class _BlockRow extends StatelessWidget {
+   }
+ }
+ 
+-/// An exact copy of what the home-screen widget draws, but live: ticks go
++/// A copy of what the home-screen widget draws, but live: ticks go
+ /// straight to the store and tasks can be edited or added.
+ class _WidgetPreview extends StatelessWidget {
+   final WidgetSnapshot snap;
+@@ -491,62 +720,84 @@ class _WidgetPreview extends StatelessWidget {
+ 
+   @override
+   Widget build(BuildContext context) {
+-    final style = widgetStyleFor(snap.style);
++    final style = widgetStyleFor(extras.widgetStyle);
++    final scale = widgetTextScale(extras.widgetTextSize);
+     final text = Color(style.text);
+     final muted = Color(style.muted);
+-    final accent = Color(style.accent);
++    final accent = widgetAccentColor(style, extras.widgetAccent);
+     final doneColor = Color(style.done);
++    final alpha = extras.widgetOpacity / 100.0;
++    final compact = extras.widgetCompact;
++    final tickMode = extras.widgetRowTap == 'tick';
++    final rowBg = style.light
++        ? const Color(0x0F000000)
++        : const Color(0x14FFFFFF);
++    final maxRows = extras.widgetMaxRows > 0 ? extras.widgetMaxRows : 8;
+ 
+-    Widget header(String title, String count) => Padding(
+-          padding: const EdgeInsets.only(top: 12, bottom: 2),
++    Widget header(String title, String count, [String more = '']) => Padding(
++          padding: EdgeInsets.only(top: compact ? 8 : 12, bottom: 4),
+           child: Row(
+             children: [
+               Expanded(
+                 child: Text(title,
+-                    style: body(10.5, muted, weight: FontWeight.w800)),
++                    style: body(10.5 * scale, muted, weight: FontWeight.w800)),
+               ),
+-              Text(count, style: body(10.5, muted)),
++              Text(more.isEmpty ? count : '$count  $more',
++                  style: body(10.5 * scale, muted)),
+             ],
+           ),
+         );
+ 
+     Widget note(String message) => Padding(
+-          padding: const EdgeInsets.only(top: 6),
+-          child: Text(message, style: body(12, muted)),
++          padding: const EdgeInsets.only(top: 4),
++          child: Text(message, style: body(12 * scale, muted)),
+         );
+ 
+     Widget row({
+       required bool done,
+       required String name,
+       required VoidCallback onTick,
+-      VoidCallback? onTap,
++      required VoidCallback? onTitle,
+     }) =>
+-        Row(
+-          children: [
+-            InkWell(
+-              borderRadius: BorderRadius.circular(16),
+-              onTap: onTick,
+-              child: Padding(
+-                padding: const EdgeInsets.fromLTRB(0, 6, 10, 6),
+-                child: Icon(
+-                    done ? Icons.check_circle_outline : Icons.radio_button_unchecked,
+-                    size: 21,
+-                    color: done ? doneColor : accent),
+-              ),
+-            ),
+-            Expanded(
+-              child: InkWell(
+-                onTap: onTap,
++        Container(
++          margin: EdgeInsets.only(bottom: compact ? 2 : 4),
++          padding: const EdgeInsets.only(left: 8),
++          decoration: BoxDecoration(
++            color: rowBg,
++            borderRadius: BorderRadius.circular(10),
++          ),
++          child: Row(
++            children: [
++              InkWell(
++                borderRadius: BorderRadius.circular(16),
++                onTap: onTick,
+                 child: Padding(
+-                  padding: const EdgeInsets.symmetric(vertical: 6),
+-                  child: Text(name,
+-                      maxLines: 1,
+-                      overflow: TextOverflow.ellipsis,
+-                      style: body(13.5, done ? doneColor : text)),
++                  padding: EdgeInsets.fromLTRB(
++                      0, compact ? 4 : 8, 10, compact ? 4 : 8),
++                  child: Icon(
++                      done ? Icons.check_circle : Icons.radio_button_unchecked,
++                      size: 21 * scale,
++                      color: done ? doneColor : accent),
+                 ),
+               ),
+-            ),
+-          ],
++              Expanded(
++                child: InkWell(
++                  onTap: onTitle,
++                  child: Padding(
++                    padding: EdgeInsets.symmetric(vertical: compact ? 4 : 8),
++                    child: Text(name,
++                        maxLines: 1,
++                        overflow: TextOverflow.ellipsis,
++                        style: body(14 * scale, done ? doneColor : text,
++                                weight: done ? FontWeight.w400 : FontWeight.w600)
++                            .copyWith(
++                                decoration:
++                                    done ? TextDecoration.lineThrough : null)),
++                  ),
++                ),
++              ),
++            ],
++          ),
+         );
+ 
+     final children = <Widget>[];
+@@ -564,8 +815,8 @@ class _WidgetPreview extends StatelessWidget {
+                         crossAxisAlignment: CrossAxisAlignment.start,
+                         children: [
+                           Text(s.value,
+-                              style: body(19, text, weight: FontWeight.w800)),
+-                          Text(s.label, style: body(10.5, muted)),
++                              style: body(20 * scale, text, weight: FontWeight.w800)),
++                          Text(s.label, style: body(10.5 * scale, muted)),
+                         ],
+                       ),
+                     ),
+@@ -585,7 +836,7 @@ class _WidgetPreview extends StatelessWidget {
+                       snap.done >= snap.total
+                           ? 'Everything done today'
+                           : '${snap.done} of ${snap.total} done today',
+-                      style: body(11.5, muted)),
++                      style: body(11.5 * scale, muted)),
+                   const SizedBox(height: 4),
+                   ClipRRect(
+                     borderRadius: BorderRadius.circular(4),
+@@ -602,39 +853,117 @@ class _WidgetPreview extends StatelessWidget {
+           }
+           break;
+         case 'tasks':
+-          final shownTasks = snap.showDoneTasks
++          final pool = snap.showDoneTasks
+               ? snap.tasks
+               : snap.tasks.where((t) => !t.task.done).toList();
+-          children.add(header('TO-DO',
+-              snap.tasks.isEmpty ? '' : '${snap.tasksDone}/${snap.tasks.length}'));
+-          if (shownTasks.isEmpty) {
++          final shown = pool.take(maxRows).toList();
++          final hidden = pool.length - shown.length;
++          children.add(header(
++              'TO-DO',
++              snap.tasks.isEmpty ? '' : '${snap.tasksDone}/${snap.tasks.length}',
++              hidden > 0 ? '+$hidden more' : ''));
++          if (shown.isEmpty) {
+             children.add(note(snap.tasks.isEmpty
+                 ? 'No tasks yet. Tap + to add one.'
+                 : 'All done. Nicely done.'));
+           }
+-          for (final line in shownTasks) {
++          for (final line in shown) {
+             children.add(row(
+               done: line.task.done,
+               name: line.task.title,
+               onTick: () => onToggleTask(line),
+-              onTap: () => onEditTask(line),
++              onTitle: tickMode
++                  ? () => onToggleTask(line)
++                  : () => onEditTask(line),
+             ));
+           }
+           break;
+         case 'habits':
+-          children.add(header('HABITS',
+-              snap.habits.isEmpty ? '' : '${snap.habitsDone}/${snap.habits.length}'));
++          final shown = snap.habits.take(maxRows).toList();
++          final hidden = snap.habits.length - shown.length;
++          children.add(header(
++              'HABITS',
++              snap.habits.isEmpty ? '' : '${snap.habitsDone}/${snap.habits.length}',
++              hidden > 0 ? '+$hidden more' : ''));
+           if (snap.habits.isEmpty) {
+             children.add(note('No habits selected. Pick some below.'));
+           }
+-          for (final line in snap.habits) {
++          for (final line in shown) {
+             children.add(row(
+               done: line.done,
+               name: line.habit.name,
+               onTick: () => onToggleHabit(line.habit),
++              onTitle: tickMode ? () => onToggleHabit(line.habit) : null,
+             ));
+           }
+           break;
++        case 'water':
++          children.add(Padding(
++            padding: const EdgeInsets.only(top: 12),
++            child: Container(
++              padding: const EdgeInsets.symmetric(horizontal: 4),
++              decoration: BoxDecoration(
++                color: rowBg,
++                borderRadius: BorderRadius.circular(10),
++              ),
++              child: Row(
++                children: [
++                  IconButton(
++                    visualDensity: VisualDensity.compact,
++                    onPressed: () => extras.changeWater(-1),
++                    icon: Icon(Icons.remove_circle_outline, color: accent),
++                  ),
++                  Expanded(
++                    child: Text(
++                        'Water  ${snap.water} / ${snap.waterGoal} glasses',
++                        textAlign: TextAlign.center,
++                        style: body(13 * scale, text, weight: FontWeight.w600)),
++                  ),
++                  IconButton(
++                    visualDensity: VisualDensity.compact,
++                    onPressed: () => extras.changeWater(1),
++                    icon: Icon(Icons.add_circle_outline, color: accent),
++                  ),
++                ],
++              ),
++            ),
++          ));
++          break;
++        case 'week':
++          children.add(Padding(
++            padding: const EdgeInsets.only(top: 12),
++            child: Row(
++              children: [
++                for (final d in snap.week)
++                  Expanded(
++                    child: Column(
++                      children: [
++                        Text(d.letter,
++                            style: body(10.5 * scale, d.today ? text : muted,
++                                weight: d.today ? FontWeight.w800 : FontWeight.w500)),
++                        const SizedBox(height: 4),
++                        Container(
++                          width: 14,
++                          height: 14,
++                          decoration: BoxDecoration(
++                            shape: BoxShape.circle,
++                            color: d.percent >= 100
++                                ? accent
++                                : (d.percent > 0
++                                    ? accent.withValues(alpha: 0.5)
++                                    : muted.withValues(alpha: 0.3)),
++                            border: d.today
++                                ? Border.all(color: text, width: 1.5)
++                                : null,
++                          ),
++                        ),
++                      ],
++                    ),
++                  ),
++              ],
++            ),
++          ));
++          break;
+         case 'mantra':
+           if (snap.mantra.isNotEmpty) {
+             children.add(Padding(
+@@ -642,7 +971,8 @@ class _WidgetPreview extends StatelessWidget {
+               child: Text('“${snap.mantra}”',
+                   maxLines: 2,
+                   overflow: TextOverflow.ellipsis,
+-                  style: body(12.5, text).copyWith(fontStyle: FontStyle.italic)),
++                  style: body(12.5 * scale, text)
++                      .copyWith(fontStyle: FontStyle.italic)),
+             ));
+           }
+           break;
+@@ -655,10 +985,13 @@ class _WidgetPreview extends StatelessWidget {
+         gradient: LinearGradient(
+           begin: Alignment.topLeft,
+           end: Alignment.bottomRight,
+-          colors: [Color(style.bgStart), Color(style.bgEnd)],
++          colors: [
++            Color(style.bgStart).withValues(alpha: alpha),
++            Color(style.bgEnd).withValues(alpha: alpha),
++          ],
+         ),
+         borderRadius: BorderRadius.circular(22),
+-        border: Border.all(color: Color(style.border)),
++        border: Border.all(color: Color(style.border).withValues(alpha: alpha)),
+         boxShadow: const [
+           BoxShadow(color: Color(0x33000000), blurRadius: 14, offset: Offset(0, 6)),
+         ],
+@@ -672,9 +1005,13 @@ class _WidgetPreview extends StatelessWidget {
+                 child: Column(
+                   crossAxisAlignment: CrossAxisAlignment.start,
+                   children: [
+-                    Text('Prakriyā',
+-                        style: body(15, Color(style.title), weight: FontWeight.w800)),
+-                    Text(snap.dateLabel, style: body(10.5, muted)),
++                    Text(snap.title,
++                        maxLines: 1,
++                        overflow: TextOverflow.ellipsis,
++                        style: body(15 * scale, Color(style.title),
++                            weight: FontWeight.w800)),
++                    if (extras.widgetShowDate)
++                      Text(snap.dateLabel, style: body(10.5 * scale, muted)),
+                   ],
+                 ),
+               ),
+@@ -701,6 +1038,50 @@ class _WidgetPreview extends StatelessWidget {
+   }
+ }
+ 
++class _AccentDot extends StatelessWidget {
++  final String label;
++  final Color? color;
++  final bool selected;
++  final VoidCallback onTap;
++  const _AccentDot({
++    required this.label,
++    required this.color,
++    required this.selected,
++    required this.onTap,
++  });
++
++  @override
++  Widget build(BuildContext context) {
++    final dark = Theme.of(context).brightness == Brightness.dark;
++    return Semantics(
++      label: '$label accent',
++      button: true,
++      selected: selected,
++      child: InkWell(
++        customBorder: const CircleBorder(),
++        onTap: onTap,
++        child: Container(
++          width: 34,
++          height: 34,
++          decoration: BoxDecoration(
++            shape: BoxShape.circle,
++            color: color,
++            border: Border.all(
++              color: selected ? Surfaces.heading(dark) : Surfaces.accentBorder(dark),
++              width: selected ? 3 : 1,
++            ),
++          ),
++          child: color == null
++              ? Icon(Icons.auto_awesome, size: 16, color: Surfaces.muted(dark))
++              : (selected
++                  ? const Icon(Icons.check, size: 16, color: Colors.white)
++                  : null),
++        ),
++      ),
++    );
++  }
++}
++
+ class _StyleSwatch extends StatelessWidget {
+   final WidgetStyleOption option;
+   final bool selected;
+diff --git a/lib/services/extras.dart b/lib/services/extras.dart
+index d95657e..14d138d 100644
+--- a/lib/services/extras.dart
++++ b/lib/services/extras.dart
+@@ -13,6 +13,17 @@ import '../models.dart' show dayKey;
+ /// in SharedPreferences, so adding or changing it can never corrupt or reset
+ /// the user's existing saved data. Changes notify listeners immediately and
+ /// the disk write happens in the background.
++/// Every block the home-screen widget can show, in default order.
++const List<String> kWidgetBlockKeys = [
++  'stats',
++  'progress',
++  'tasks',
++  'habits',
++  'water',
++  'week',
++  'mantra',
++];
++
+ class Extras extends ChangeNotifier {
+   static const _key = 'prakriya_extras_v1';
+ 
+@@ -48,20 +59,23 @@ class Extras extends ChangeNotifier {
+   int meditationInterval = 0;
+   String breathPattern = 'calm';
+ 
+-  /// Home-screen widget: look, the order of its blocks, which blocks are
+-  /// switched off, which dashboard stats it shows, and whether ticked tasks
+-  /// stay in the list.
++  /// Home-screen widget settings. Look: style, accent ('' = the style's own),
++  /// background opacity (percent), text size and row density. Content: block
++  /// order and which are off, dashboard stats, header, list behaviour, water.
+   String widgetStyle = 'dusk';
+-  List<String> widgetOrder = <String>[
+-    'stats',
+-    'progress',
+-    'tasks',
+-    'habits',
+-    'mantra',
+-  ];
+-  List<String> widgetOff = <String>[];
++  String widgetAccent = '';
++  int widgetOpacity = 100;
++  String widgetTextSize = 'medium';
++  bool widgetCompact = false;
++  List<String> widgetOrder = <String>[...kWidgetBlockKeys];
++  List<String> widgetOff = <String>['water', 'week'];
+   List<String> widgetStats = <String>['habits', 'tasks', 'streak'];
+   bool widgetShowDoneTasks = true;
++  String widgetTitleMode = 'app';
++  bool widgetShowDate = true;
++  String widgetRowTap = 'open';
++  int widgetMaxRows = 0;
++  int widgetWaterGoal = 8;
+ 
+   /// False until the old per-section switches were copied across once.
+   bool widgetBlocksSeeded = false;
+@@ -131,14 +145,47 @@ class Extras extends ChangeNotifier {
+             widgetStyle = decoded['widgetStyle'] as String;
+           }
+           final order = _readStringList(decoded['widgetOrder']);
+-          if (order != null) widgetOrder = _completeOrder(order);
+           final off = _readStringList(decoded['widgetOff']);
+           if (off != null) widgetOff = off;
++          if (order != null) {
++            // Blocks added in later versions start switched off for people
++            // who already had a saved layout.
++            for (final k in kWidgetBlockKeys) {
++              if (!order.contains(k) && !widgetOff.contains(k)) widgetOff.add(k);
++            }
++            widgetOrder = _completeOrder(order);
++          }
+           final stats = _readStringList(decoded['widgetStats']);
+           if (stats != null) widgetStats = stats.take(4).toList();
+           if (decoded['widgetShowDoneTasks'] is bool) {
+             widgetShowDoneTasks = decoded['widgetShowDoneTasks'] as bool;
+           }
++          if (decoded['widgetAccent'] is String) {
++            widgetAccent = decoded['widgetAccent'] as String;
++          }
++          final opacity = decoded['widgetOpacity'];
++          if (opacity is num) {
++            widgetOpacity = opacity.toInt().clamp(30, 100).toInt();
++          }
++          if (decoded['widgetTextSize'] is String) {
++            widgetTextSize = decoded['widgetTextSize'] as String;
++          }
++          widgetCompact = decoded['widgetCompact'] == true;
++          if (decoded['widgetTitleMode'] is String) {
++            widgetTitleMode = decoded['widgetTitleMode'] as String;
++          }
++          if (decoded['widgetShowDate'] is bool) {
++            widgetShowDate = decoded['widgetShowDate'] as bool;
++          }
++          if (decoded['widgetRowTap'] is String) {
++            widgetRowTap = decoded['widgetRowTap'] as String;
++          }
++          final maxRows = decoded['widgetMaxRows'];
++          if (maxRows is num) widgetMaxRows = maxRows.toInt().clamp(0, 20).toInt();
++          final waterGoal = decoded['widgetWaterGoal'];
++          if (waterGoal is num) {
++            widgetWaterGoal = waterGoal.toInt().clamp(1, 30).toInt();
++          }
+           widgetBlocksSeeded = decoded['widgetBlocksSeeded'] == true;
+           checklistDismissed = decoded['checklistDismissed'] == true;
+           recapDismissedWeek = decoded['recapDismissedWeek'] is String
+@@ -163,9 +210,8 @@ class Extras extends ChangeNotifier {
+   /// A saved order that predates a block (or lost one) still lists every
+   /// block exactly once.
+   static List<String> _completeOrder(List<String> saved) {
+-    const all = ['stats', 'progress', 'tasks', 'habits', 'mantra'];
+-    final out = <String>[for (final k in saved) if (all.contains(k)) k];
+-    for (final k in all) {
++    final out = <String>[for (final k in saved) if (kWidgetBlockKeys.contains(k)) k];
++    for (final k in kWidgetBlockKeys) {
+       if (!out.contains(k)) out.add(k);
+     }
+     return out.toSet().toList();
+@@ -215,6 +261,15 @@ class Extras extends ChangeNotifier {
+           'meditationInterval': meditationInterval,
+           'breathPattern': breathPattern,
+           'widgetStyle': widgetStyle,
++          'widgetAccent': widgetAccent,
++          'widgetOpacity': widgetOpacity,
++          'widgetTextSize': widgetTextSize,
++          'widgetCompact': widgetCompact,
++          'widgetTitleMode': widgetTitleMode,
++          'widgetShowDate': widgetShowDate,
++          'widgetRowTap': widgetRowTap,
++          'widgetMaxRows': widgetMaxRows,
++          'widgetWaterGoal': widgetWaterGoal,
+           'widgetOrder': widgetOrder,
+           'widgetOff': widgetOff,
+           'widgetStats': widgetStats,
+@@ -307,6 +362,49 @@ class Extras extends ChangeNotifier {
+     _changed();
+   }
+ 
++  /// Look settings; pass only what changes.
++  void setWidgetLook({
++    String? accent,
++    int? opacity,
++    String? textSize,
++    bool? compact,
++  }) {
++    if (accent != null) widgetAccent = accent;
++    if (opacity != null) widgetOpacity = opacity.clamp(30, 100).toInt();
++    if (textSize != null) widgetTextSize = textSize;
++    if (compact != null) widgetCompact = compact;
++    _changed();
++  }
++
++  /// Content settings; pass only what changes.
++  void setWidgetContent({
++    String? titleMode,
++    bool? showDate,
++    String? rowTap,
++    int? maxRows,
++    int? waterGoal,
++  }) {
++    if (titleMode != null) widgetTitleMode = titleMode;
++    if (showDate != null) widgetShowDate = showDate;
++    if (rowTap != null) widgetRowTap = rowTap;
++    if (maxRows != null) widgetMaxRows = maxRows.clamp(0, 20).toInt();
++    if (waterGoal != null) widgetWaterGoal = waterGoal.clamp(1, 30).toInt();
++    _changed();
++  }
++
++  /// Applies a ready-made layout in one go.
++  void applyWidgetLayout({
++    required List<String> order,
++    required List<String> off,
++    required List<String> stats,
++  }) {
++    widgetOrder = _completeOrder(order);
++    widgetOff = List<String>.from(off);
++    widgetStats = stats.take(4).toList();
++    widgetBlocksSeeded = true;
++    _changed();
++  }
++
+   void setWidgetBlockOn(String key, bool on) {
+     widgetOff.remove(key);
+     if (!on) widgetOff.add(key);
+@@ -378,6 +476,14 @@ class Extras extends ChangeNotifier {
+     _changed();
+   }
+ 
++  /// Adjusts the water count for a specific day (used when ticks made on the
++  /// home-screen widget are applied after midnight).
++  void changeWaterOn(DateTime day, int delta) {
++    final key = dayKey(day);
++    water[key] = ((water[key] ?? 0) + delta).clamp(0, 30).toInt();
++    _changed();
++  }
++
+   double? sleepOn(DateTime day) => sleep[dayKey(day)];
+ 
+   void setSleep(double hours) {
+diff --git a/lib/services/home_widget_service.dart b/lib/services/home_widget_service.dart
+index 3bf9527..dda75b3 100644
+--- a/lib/services/home_widget_service.dart
++++ b/lib/services/home_widget_service.dart
+@@ -1,5 +1,6 @@
+ import 'dart:async';
+ import 'dart:convert';
++import 'dart:ui' show Color;
+ 
+ import 'package:flutter/foundation.dart';
+ import 'package:home_widget/home_widget.dart';
+@@ -13,6 +14,7 @@ import 'extras.dart';
+ class WidgetStyleOption {
+   final String key;
+   final String label;
++  final bool light;
+   final int bgStart;
+   final int bgEnd;
+   final int border;
+@@ -24,6 +26,7 @@ class WidgetStyleOption {
+   const WidgetStyleOption({
+     required this.key,
+     required this.label,
++    required this.light,
+     required this.bgStart,
+     required this.bgEnd,
+     required this.border,
+@@ -37,49 +40,45 @@ class WidgetStyleOption {
+ 
+ const List<WidgetStyleOption> kWidgetStyles = [
+   WidgetStyleOption(
+-      key: 'dusk',
+-      label: 'Dusk',
+-      bgStart: 0xFF2A1650,
+-      bgEnd: 0xFF150C28,
+-      border: 0xFF44307A,
+-      title: 0xFFF2B93B,
+-      text: 0xFFF4EEFF,
+-      muted: 0xFFA99BD0,
+-      accent: 0xFFF2B93B,
+-      done: 0xFF7F72A8),
++      key: 'dusk', label: 'Dusk', light: false,
++      bgStart: 0xFF2A1650, bgEnd: 0xFF150C28, border: 0xFF44307A,
++      title: 0xFFF2B93B, text: 0xFFF4EEFF, muted: 0xFFB4A8DA,
++      accent: 0xFFF2B93B, done: 0xFF8A7DB0),
+   WidgetStyleOption(
+-      key: 'sunrise',
+-      label: 'Sunrise',
+-      bgStart: 0xFFFFF4E2,
+-      bgEnd: 0xFFFFD7AE,
+-      border: 0xFFF0B98A,
+-      title: 0xFFC2531A,
+-      text: 0xFF3A2216,
+-      muted: 0xFF8A5A3C,
+-      accent: 0xFFE2661F,
+-      done: 0xFFB59A86),
++      key: 'midnight', label: 'Midnight', light: false,
++      bgStart: 0xFF101014, bgEnd: 0xFF000000, border: 0xFF2A2A33,
++      title: 0xFFFFFFFF, text: 0xFFF2F2F5, muted: 0xFF9A9AA8,
++      accent: 0xFF7CC4FF, done: 0xFF70707E),
+   WidgetStyleOption(
+-      key: 'forest',
+-      label: 'Forest',
+-      bgStart: 0xFF1B4A3A,
+-      bgEnd: 0xFF0D2620,
+-      border: 0xFF2E6B55,
+-      title: 0xFF7BE0B2,
+-      text: 0xFFE6F5EC,
+-      muted: 0xFF8FBFA6,
+-      accent: 0xFF5ED39A,
+-      done: 0xFF6E9C87),
++      key: 'ocean', label: 'Ocean', light: false,
++      bgStart: 0xFF0F3B5C, bgEnd: 0xFF071B2E, border: 0xFF1F5F8B,
++      title: 0xFF7FD8FF, text: 0xFFEAF6FF, muted: 0xFF93BAD6,
++      accent: 0xFF4FC3F7, done: 0xFF6C90AA),
+   WidgetStyleOption(
+-      key: 'paper',
+-      label: 'Paper',
+-      bgStart: 0xFFFFFDF7,
+-      bgEnd: 0xFFF6EFE0,
+-      border: 0xFFE4D9C3,
+-      title: 0xFF5A32A8,
+-      text: 0xFF2B2140,
+-      muted: 0xFF8E84A3,
+-      accent: 0xFF6B3FC4,
+-      done: 0xFFA89FB8),
++      key: 'forest', label: 'Forest', light: false,
++      bgStart: 0xFF1B4A3A, bgEnd: 0xFF0D2620, border: 0xFF2E6B55,
++      title: 0xFF7BE0B2, text: 0xFFE6F5EC, muted: 0xFF9CC8B2,
++      accent: 0xFF5ED39A, done: 0xFF729F8B),
++  WidgetStyleOption(
++      key: 'graphite', label: 'Graphite', light: false,
++      bgStart: 0xFF3A3F47, bgEnd: 0xFF1C1F24, border: 0xFF565C66,
++      title: 0xFFFFC857, text: 0xFFF1F3F5, muted: 0xFFA9B0BA,
++      accent: 0xFFFFC857, done: 0xFF7E858F),
++  WidgetStyleOption(
++      key: 'sunrise', label: 'Sunrise', light: true,
++      bgStart: 0xFFFFF4E2, bgEnd: 0xFFFFD7AE, border: 0xFFF0B98A,
++      title: 0xFFC2531A, text: 0xFF3A2216, muted: 0xFF7A4E32,
++      accent: 0xFFE2661F, done: 0xFFA48A76),
++  WidgetStyleOption(
++      key: 'rose', label: 'Rose', light: true,
++      bgStart: 0xFFFFF0F4, bgEnd: 0xFFFFD3DF, border: 0xFFF0AFC2,
++      title: 0xFFB8264F, text: 0xFF3B1A25, muted: 0xFF7A4A5C,
++      accent: 0xFFD6336C, done: 0xFFA98593),
++  WidgetStyleOption(
++      key: 'paper', label: 'Paper', light: true,
++      bgStart: 0xFFFFFDF7, bgEnd: 0xFFF6EFE0, border: 0xFFE4D9C3,
++      title: 0xFF5A32A8, text: 0xFF2B2140, muted: 0xFF766C8C,
++      accent: 0xFF6B3FC4, done: 0xFF9E95AE),
+ ];
+ 
+ WidgetStyleOption widgetStyleFor(String key) {
+@@ -89,6 +88,47 @@ WidgetStyleOption widgetStyleFor(String key) {
+   return kWidgetStyles.first;
+ }
+ 
++/// Accent colours that can replace a style's own ('auto').
++const List<(String key, String label, int color)> kWidgetAccents = [
++  ('auto', 'Auto', 0),
++  ('gold', 'Gold', 0xFFF2B93B),
++  ('orange', 'Orange', 0xFFFF8A3D),
++  ('rose', 'Rose', 0xFFF0517A),
++  ('green', 'Green', 0xFF3DDC97),
++  ('teal', 'Teal', 0xFF22C7C0),
++  ('blue', 'Blue', 0xFF4C8DFF),
++  ('violet', 'Violet', 0xFF9B6BFF),
++];
++
++/// Hex (#RRGGBB) of an accent key, or '' for 'auto' / unknown.
++String widgetAccentHex(String key) {
++  for (final a in kWidgetAccents) {
++    if (a.$1 == key && a.$3 != 0) {
++      return '#${(a.$3 & 0xFFFFFF).toRadixString(16).padLeft(6, '0').toUpperCase()}';
++    }
++  }
++  return '';
++}
++
++/// The colour a widget style actually uses for accents.
++Color widgetAccentColor(WidgetStyleOption style, String accentKey) {
++  for (final a in kWidgetAccents) {
++    if (a.$1 == accentKey && a.$3 != 0) return Color(a.$3);
++  }
++  return Color(style.accent);
++}
++
++double widgetTextScale(String size) {
++  switch (size) {
++    case 'small':
++      return 0.9;
++    case 'large':
++      return 1.2;
++    default:
++      return 1.0;
++  }
++}
++
+ class WidgetHabitLine {
+   final Habit habit;
+   final bool done;
+@@ -113,26 +153,59 @@ class WidgetStat {
+ /// Blocks the widget can show, in their default order.
+ const List<(String key, String label, String hint)> kWidgetBlocks = [
+   ('stats', 'Dashboard stats', 'Up to four numbers at a glance'),
+-  ('progress', 'Progress bar', "How much of today is done"),
++  ('progress', 'Progress bar', 'How much of today is done'),
+   ('tasks', 'To-do list', 'Today\'s tasks, tick them right on the widget'),
+   ('habits', 'Habit checklist', 'Tick habits right on the widget'),
+-  ('mantra', 'Daily mantra', "Today's line to carry"),
++  ('water', 'Water tracker', 'Log glasses with - and + on the widget'),
++  ('week', 'Week at a glance', 'Seven dots showing your last seven days'),
++  ('mantra', 'Daily mantra', 'Today\'s line to carry'),
+ ];
+ 
+ /// Stats the dashboard block can show.
+ const List<(String key, String label)> kWidgetStatOptions = [
+   ('habits', 'Habits'),
+   ('tasks', 'Tasks'),
++  ('open', 'Tasks left'),
+   ('streak', 'Day streak'),
+   ('focus', 'Focus'),
+   ('meditate', 'Meditated'),
+   ('water', 'Water'),
++  ('sleep', 'Sleep'),
+ ];
+ 
++/// Ready-made layouts.
++class WidgetPreset {
++  final String name;
++  final String blurb;
++  final List<String> on;
++  final List<String> stats;
++  const WidgetPreset(this.name, this.blurb, this.on, this.stats);
++}
++
++const List<WidgetPreset> kWidgetPresets = [
++  WidgetPreset('Full dashboard', 'Stats, progress, tasks and habits',
++      ['stats', 'progress', 'tasks', 'habits'], ['habits', 'tasks', 'streak']),
++  WidgetPreset('To-do focus', 'Just your list, big and clear',
++      ['tasks'], ['tasks']),
++  WidgetPreset('Habit tracker', 'Habits with your week at a glance',
++      ['progress', 'habits', 'week'], ['habits', 'streak']),
++  WidgetPreset('Wellness', 'Habits, water and mantra',
++      ['stats', 'habits', 'water', 'mantra'], ['streak', 'water', 'meditate']),
++  WidgetPreset('Minimal', 'A quiet strip of numbers',
++      ['stats'], ['habits', 'tasks', 'streak', 'water']),
++];
++
++class WidgetWeekDay {
++  final String letter;
++  final int percent;
++  final bool today;
++  const WidgetWeekDay(this.letter, this.percent, this.today);
++}
++
+ /// Everything the widget shows right now, computed once so the in-app
+ /// preview and the native widget never disagree.
+ class WidgetSnapshot {
+-  final String style;
++  final String title;
+   final String dateLabel;
+   final String mantra;
+   final int streak;
+@@ -140,9 +213,12 @@ class WidgetSnapshot {
+   final List<WidgetStat> stats;
+   final List<WidgetHabitLine> habits;
+   final List<WidgetTaskLine> tasks;
++  final int water;
++  final int waterGoal;
++  final List<WidgetWeekDay> week;
+   final bool showDoneTasks;
+   const WidgetSnapshot({
+-    required this.style,
++    required this.title,
+     required this.dateLabel,
+     required this.mantra,
+     required this.streak,
+@@ -150,6 +226,9 @@ class WidgetSnapshot {
+     required this.stats,
+     required this.habits,
+     required this.tasks,
++    required this.water,
++    required this.waterGoal,
++    required this.week,
+     required this.showDoneTasks,
+   });
+ 
+@@ -162,12 +241,13 @@ class WidgetSnapshot {
+ /// Keeps the Android home-screen widget in sync with the app, in both
+ /// directions.
+ ///
+-/// App to widget: the look, the blocks to show and today's lists are written
++/// App to widget: the look, the blocks to show and today's data are written
+ /// as text into shared preferences and the widget is told to redraw.
+-/// Widget to app: ticking a task or habit on the widget redraws it at once
+-/// and queues the change under `widget_pending`; [syncFromWidget] applies
+-/// that queue to the store the next time the app runs. Taps on titles open
+-/// the app, which reports them through [pendingOpen].
++/// Widget to app: ticking a task or habit, or logging water, on the widget
++/// redraws it at once and queues the change under `widget_pending`;
++/// [syncFromWidget] applies that queue to the store the next time the app
++/// runs. Taps on titles open the app, which reports them through
++/// [pendingOpen].
+ ///
+ /// The native provider and layouts live in `android_overrides/widget/` and
+ /// are copied into the generated Android project by CI.
+@@ -225,6 +305,13 @@ class HomeWidgetService {
+ 
+   // ---- Snapshot ----
+ 
++  static String greeting(DateTime now, String name) {
++    final h = now.hour;
++    final part = h < 12 ? 'Good morning' : (h < 17 ? 'Good afternoon' : 'Good evening');
++    final n = name.trim();
++    return n.isEmpty ? part : '$part, $n';
++  }
++
+   /// What the widget shows right now.
+   WidgetSnapshot snapshot() {
+     final today = DateTime.now();
+@@ -255,9 +342,12 @@ class HomeWidgetService {
+               habitLines.isEmpty ? '–' : '$habitsDone/${habitLines.length}'));
+           break;
+         case 'tasks':
+-          final tasksDone = taskLines.where((t) => t.task.done).length;
+-          stats.add(WidgetStat('tasks', 'Tasks',
+-              taskLines.isEmpty ? '–' : '$tasksDone/${taskLines.length}'));
++          final tasksDone = all.where((t) => t.done).length;
++          stats.add(WidgetStat(
++              'tasks', 'Tasks', all.isEmpty ? '–' : '$tasksDone/${all.length}'));
++          break;
++        case 'open':
++          stats.add(WidgetStat('open', 'Tasks left', '${open.length}'));
+           break;
+         case 'streak':
+           stats.add(WidgetStat('streak', 'Day streak', '$streak'));
+@@ -272,11 +362,28 @@ class HomeWidgetService {
+         case 'water':
+           stats.add(WidgetStat('water', 'Water', '${extras.waterOn(today)}'));
+           break;
++        case 'sleep':
++          final hours = extras.sleepOn(today);
++          stats.add(WidgetStat('sleep', 'Sleep',
++              hours == null ? '–' : '${hours.toStringAsFixed(hours % 1 == 0 ? 0 : 1)}h'));
++          break;
+       }
+     }
+ 
++    String title;
++    switch (extras.widgetTitleMode) {
++      case 'greeting':
++        title = greeting(today, store.userName);
++        break;
++      case 'day':
++        title = 'Today';
++        break;
++      default:
++        title = 'Prakriyā';
++    }
++
+     return WidgetSnapshot(
+-      style: extras.widgetStyle,
++      title: title,
+       dateLabel: _dateLabel(today),
+       mantra: store.mantraOfTheDay,
+       streak: streak,
+@@ -287,10 +394,32 @@ class HomeWidgetService {
+       stats: stats,
+       habits: habitLines,
+       tasks: taskLines,
++      water: extras.waterOn(today),
++      waterGoal: extras.widgetWaterGoal,
++      week: _week(today),
+       showDoneTasks: extras.widgetShowDoneTasks,
+     );
+   }
+ 
++  /// The last seven days, oldest first: percent of selected habits done.
++  List<WidgetWeekDay> _week(DateTime today) {
++    const letters = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
++    final selected =
++        store.habits.where((h) => store.widgetHabitSelected(h.id)).toList();
++    final out = <WidgetWeekDay>[];
++    for (var back = 6; back >= 0; back--) {
++      final day = DateTime(today.year, today.month, today.day)
++          .subtract(Duration(days: back));
++      var percent = 0;
++      if (selected.isNotEmpty) {
++        final done = selected.where((h) => h.isDoneOn(day)).length;
++        percent = ((done * 100) / selected.length).round();
++      }
++      out.add(WidgetWeekDay(letters[day.weekday - 1], percent, back == 0));
++    }
++    return out;
++  }
++
+   static String _dateLabel(DateTime d) {
+     const days = [
+       'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'
+@@ -342,8 +471,9 @@ class HomeWidgetService {
+ 
+   // ---- Widget to app ----
+ 
+-  /// Applies ticks made on the home-screen widget to the store. Safe to call
+-  /// at any time; does nothing when nothing is queued.
++  /// Applies ticks made on the home-screen widget to the store. Each queued
++  /// change carries the day it was made on, so a tick made just before
++  /// midnight still lands on the right day. Safe to call at any time.
+   Future<void> syncFromWidget() async {
+     try {
+       final raw = await HomeWidget.getWidgetData<String>('widget_pending',
+@@ -352,25 +482,42 @@ class HomeWidgetService {
+       await HomeWidget.saveWidgetData<String>('widget_pending', '[]');
+       final decoded = jsonDecode(raw);
+       if (decoded is! List) return;
+-      final todayKey = dayKey(DateTime.now());
+       final now = DateTime.now();
++      final today = DateTime(now.year, now.month, now.day);
+       for (final entry in decoded) {
+         if (entry is! Map) continue;
+-        final day = entry['day'];
+-        if (day is String && day.isNotEmpty && day != todayKey) continue;
++        var date = today;
++        final dayText = entry['day'];
++        if (dayText is String && dayText.isNotEmpty) {
++          final parsed = DateTime.tryParse(dayText);
++          if (parsed != null) {
++            date = DateTime(parsed.year, parsed.month, parsed.day);
++          }
++        }
++        // Ignore anything implausibly old or from the future.
++        final age = today.difference(date).inDays;
++        if (age < 0 || age > 7) continue;
++
+         final kind = entry['k'];
++        if (kind == 'water') {
++          final delta = entry['delta'];
++          if (delta is num && delta != 0) {
++            extras.changeWaterOn(date, delta.toInt());
++          }
++          continue;
++        }
+         final key = entry['key'];
+-        final want = entry['v'] == true;
+         if (key is! String) continue;
++        final want = entry['v'] == true;
+         if (kind == 'habit') {
+           for (final h in store.habits) {
+             if (h.id == key) {
+-              if (h.isDoneOn(now) != want) await store.toggleHabit(h);
++              if (h.isDoneOn(date) != want) await store.toggleHabitOn(h, date);
+               break;
+             }
+           }
+         } else if (kind == 'task') {
+-          final tasks = store.todaysTasks;
++          final tasks = store.tasksFor(date);
+           final hint = entry['i'];
+           var index = -1;
+           if (hint is int &&
+@@ -386,9 +533,7 @@ class HomeWidgetService {
+               }
+             }
+           }
+-          if (index >= 0 && tasks[index].done != want) {
+-            await store.toggleTask(index);
+-          }
++          if (index >= 0) await store.setTaskDoneOn(date, index, want);
+         }
+       }
+     } catch (e) {
+@@ -414,6 +559,11 @@ class HomeWidgetService {
+     }
+   }
+ 
++  static String _taskJson(List<WidgetTaskLine> lines) => jsonEncode([
++        for (final t in lines)
++          {'i': t.index, 't': t.task.title, 'd': t.task.done},
++      ]);
++
+   Future<void> _pushOnce() async {
+     try {
+       // Ticks made on the widget come first, so the data we write back
+@@ -423,6 +573,8 @@ class HomeWidgetService {
+       // One-time: carry the older per-section switches into the block list.
+       if (!extras.widgetBlocksSeeded) {
+         extras.seedWidgetBlocks(off: <String>[
++          'water',
++          'week',
+           if (!store.widgetShowHabits) 'habits',
+           if (!store.widgetShowPriorities) 'tasks',
+           if (!store.widgetShowMantra) 'mantra',
+@@ -430,10 +582,18 @@ class HomeWidgetService {
+       }
+ 
+       final snap = snapshot();
+-      final tasksJson = jsonEncode([
+-        for (final t in snap.tasks)
+-          {'i': t.index, 't': t.task.title, 'd': t.task.done},
+-      ]);
++      final now = DateTime.now();
++
++      // Tomorrow's tasks, so the widget can show them after midnight even if
++      // the app has not been opened yet.
++      final tomorrow = DateTime(now.year, now.month, now.day)
++          .add(const Duration(days: 1));
++      final tomorrowTasks = store.tasksFor(tomorrow);
++      final tomorrowLines = <WidgetTaskLine>[
++        for (var i = 0; i < tomorrowTasks.length; i++)
++          if (!tomorrowTasks[i].done) WidgetTaskLine(i, tomorrowTasks[i]),
++      ];
++
+       final habitsJson = jsonEncode([
+         for (final h in snap.habits)
+           {'id': h.habit.id, 'n': h.habit.name, 'd': h.done},
+@@ -441,20 +601,37 @@ class HomeWidgetService {
+       final statsJson = jsonEncode([
+         for (final s in snap.stats) {'k': s.key, 'l': s.label, 'v': s.value},
+       ]);
++      final weekJson = jsonEncode([
++        for (final d in snap.week) {'l': d.letter, 'p': d.percent},
++      ]);
+ 
+       Future<void> put(String key, String value) async {
+         await HomeWidget.saveWidgetData<String>(key, value);
+       }
+ 
+-      await put('widget_style', snap.style);
++      await put('widget_style', extras.widgetStyle);
++      await put('widget_accent', widgetAccentHex(extras.widgetAccent));
++      await put('widget_opacity', '${extras.widgetOpacity}');
++      await put('widget_text_size', extras.widgetTextSize);
++      await put('widget_compact', extras.widgetCompact ? '1' : '0');
++      await put('widget_title_mode', extras.widgetTitleMode);
++      await put('widget_user', store.userName);
++      await put('widget_show_date', extras.widgetShowDate ? '1' : '0');
++      await put('widget_row_tap', extras.widgetRowTap);
++      await put('widget_max_rows', '${extras.widgetMaxRows}');
+       await put('widget_date', snap.dateLabel);
+-      await put('widget_day', dayKey(DateTime.now()));
++      await put('widget_day', dayKey(now));
+       await put('widget_blocks', jsonEncode(snap.blocks));
+       await put('widget_stats', statsJson);
+-      await put('widget_tasks', tasksJson);
++      await put('widget_tasks', _taskJson(snap.tasks));
++      await put('widget_tasks_next', _taskJson(tomorrowLines));
++      await put('widget_next_day', dayKey(tomorrow));
+       await put('widget_habits', habitsJson);
+-      await put('widget_mantra', snap.mantra);
++      await put('widget_water', '${snap.water}');
++      await put('widget_water_goal', '${snap.waterGoal}');
++      await put('widget_week', weekJson);
+       await put('widget_show_done_tasks', snap.showDoneTasks ? '1' : '0');
++      await put('widget_mantra', snap.mantra);
+       await HomeWidget.updateWidget(androidName: _androidWidgetName);
+     } catch (_) {
+       // No widget added yet, or a platform without the native provider.
+diff --git a/lib/store.dart b/lib/store.dart
+index 96f9592..048f43d 100644
+--- a/lib/store.dart
++++ b/lib/store.dart
+@@ -208,6 +208,16 @@ class Store extends ChangeNotifier {
+     await _commit();
+   }
+ 
++  /// Sets a task's done state on any day's list (used when ticks made on the
++  /// home-screen widget are applied after midnight).
++  Future<void> setTaskDoneOn(DateTime date, int index, bool done) async {
++    final list = _state.tasksByDay[dayKey(date)];
++    if (list == null || index < 0 || index >= list.length) return;
++    if (list[index].done == done) return;
++    list[index].done = done;
++    await _commit();
++  }
++
+   /// Changes a task's title (for today's list).
+   Future<void> renameTask(int index, String title) async {
+     final trimmed = title.trim();

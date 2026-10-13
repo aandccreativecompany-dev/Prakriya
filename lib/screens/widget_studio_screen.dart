@@ -147,6 +147,71 @@ class _WidgetStudioScreenState extends State<WidgetStudioScreen> {
     );
   }
 
+  void _applyPreset(WidgetPreset p) {
+    final rest = kWidgetBlockKeys.where((k) => !p.on.contains(k));
+    extras.applyWidgetLayout(
+      order: <String>[...p.on, ...rest],
+      off: <String>[for (final k in kWidgetBlockKeys) if (!p.on.contains(k)) k],
+      stats: p.stats,
+    );
+  }
+
+  Widget _title(String text, bool dark, {String? hint}) => Padding(
+        padding: const EdgeInsets.only(top: 24, bottom: 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(text, style: label(Surfaces.muted(dark))),
+            if (hint != null) ...[
+              const SizedBox(height: 4),
+              Text(hint, style: body(11.5, Surfaces.muted(dark))),
+            ],
+          ],
+        ),
+      );
+
+  Widget _switchRow(bool dark, String title, String hint, bool value,
+          ValueChanged<bool> onChanged) =>
+      Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      style: body(13.5, Surfaces.bodyText(dark),
+                          weight: FontWeight.w600)),
+                  Text(hint, style: body(11, Surfaces.muted(dark))),
+                ],
+              ),
+            ),
+            Switch(
+              value: value,
+              activeTrackColor: Surfaces.accent(dark),
+              onChanged: onChanged,
+            ),
+          ],
+        ),
+      );
+
+  Widget _chips(List<(String, String)> options, String current,
+      ValueChanged<String> onPick) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final o in options)
+          _HabitChip(
+            name: o.$2,
+            selected: current == o.$1,
+            onTap: () => onPick(o.$1),
+          ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
@@ -161,6 +226,9 @@ class _WidgetStudioScreenState extends State<WidgetStudioScreen> {
               final habits = store.habits;
               final habitsOn = extras.widgetBlockOn('habits');
               final statsOn = extras.widgetBlockOn('stats');
+              final waterOn = extras.widgetBlockOn('water');
+              final listOn =
+                  extras.widgetBlockOn('tasks') || extras.widgetBlockOn('habits');
               return Column(
                 children: [
                   const ScreenHeader(
@@ -205,13 +273,47 @@ class _WidgetStudioScreenState extends State<WidgetStudioScreen> {
                                 textAlign: TextAlign.center,
                                 style: body(11.5, Surfaces.muted(dark))),
                           ),
-                        const SizedBox(height: 24),
-                        Text('WHAT SHOWS, AND IN WHAT ORDER',
-                            style: label(Surfaces.muted(dark))),
-                        const SizedBox(height: 6),
-                        Text('Switch blocks on or off. Press and drag the handle to reorder.',
-                            style: body(11.5, Surfaces.muted(dark))),
-                        const SizedBox(height: 10),
+                        _title('QUICK LAYOUTS', dark,
+                            hint: 'One tap sets the blocks and stats. Fine-tune below.'),
+                        SizedBox(
+                          height: 74,
+                          child: ListView.separated(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: kWidgetPresets.length,
+                            separatorBuilder: (_, __) => const SizedBox(width: 10),
+                            itemBuilder: (_, i) {
+                              final p = kWidgetPresets[i];
+                              return InkWell(
+                                borderRadius: BorderRadius.circular(16),
+                                onTap: () => _applyPreset(p),
+                                child: Container(
+                                  width: 168,
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(16),
+                                    border: Border.all(
+                                        color: Surfaces.accentBorder(dark)),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(p.name,
+                                          style: body(13, Surfaces.heading(dark),
+                                              weight: FontWeight.w700)),
+                                      const SizedBox(height: 2),
+                                      Text(p.blurb,
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: body(11, Surfaces.muted(dark))),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                        _title('WHAT SHOWS, AND IN WHAT ORDER', dark,
+                            hint: 'Switch blocks on or off. Press and drag the handle to reorder.'),
                         ModuleCard(
                           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                           child: ReorderableListView(
@@ -239,12 +341,7 @@ class _WidgetStudioScreenState extends State<WidgetStudioScreen> {
                           ),
                         ),
                         if (statsOn) ...[
-                          const SizedBox(height: 24),
-                          Text('DASHBOARD STATS', style: label(Surfaces.muted(dark))),
-                          const SizedBox(height: 6),
-                          Text('Pick up to four.',
-                              style: body(11.5, Surfaces.muted(dark))),
-                          const SizedBox(height: 10),
+                          _title('DASHBOARD STATS', dark, hint: 'Pick up to four.'),
                           Wrap(
                             spacing: 8,
                             runSpacing: 8,
@@ -258,32 +355,35 @@ class _WidgetStudioScreenState extends State<WidgetStudioScreen> {
                             ],
                           ),
                         ],
-                        if (extras.widgetBlockOn('tasks')) ...[
-                          const SizedBox(height: 24),
+                        if (waterOn) ...[
+                          _title('WATER GOAL', dark,
+                              hint: 'Glasses a day. Use - and + on the widget to log.'),
                           ModuleCard(
                             child: Row(
                               children: [
-                                Expanded(
-                                  child: Text('Keep finished tasks in the list',
-                                      style: body(13.5, Surfaces.bodyText(dark),
-                                          weight: FontWeight.w500)),
+                                IconButton(
+                                  onPressed: () => extras.setWidgetContent(
+                                      waterGoal: extras.widgetWaterGoal - 1),
+                                  icon: const Icon(Icons.remove_circle_outline),
                                 ),
-                                Switch(
-                                  value: extras.widgetShowDoneTasks,
-                                  activeTrackColor: Surfaces.accent(dark),
-                                  onChanged: extras.setWidgetShowDoneTasks,
+                                Expanded(
+                                  child: Text('${extras.widgetWaterGoal} glasses',
+                                      textAlign: TextAlign.center,
+                                      style: body(14, Surfaces.heading(dark),
+                                          weight: FontWeight.w700)),
+                                ),
+                                IconButton(
+                                  onPressed: () => extras.setWidgetContent(
+                                      waterGoal: extras.widgetWaterGoal + 1),
+                                  icon: const Icon(Icons.add_circle_outline),
                                 ),
                               ],
                             ),
                           ),
                         ],
                         if (habitsOn && habits.isNotEmpty) ...[
-                          const SizedBox(height: 24),
-                          Text('WHICH HABITS', style: label(Surfaces.muted(dark))),
-                          const SizedBox(height: 6),
-                          Text('Tap to include or leave out a habit.',
-                              style: body(11.5, Surfaces.muted(dark))),
-                          const SizedBox(height: 10),
+                          _title('WHICH HABITS', dark,
+                              hint: 'Tap to include or leave out a habit.'),
                           Wrap(
                             spacing: 8,
                             runSpacing: 8,
@@ -297,20 +397,149 @@ class _WidgetStudioScreenState extends State<WidgetStudioScreen> {
                             ],
                           ),
                         ],
-                        const SizedBox(height: 24),
-                        Text('LOOK', style: label(Surfaces.muted(dark))),
-                        const SizedBox(height: 10),
-                        Row(
-                          children: [
-                            for (final option in kWidgetStyles)
-                              Expanded(
+                        if (listOn) ...[
+                          _title('LISTS', dark,
+                              hint: 'Make your tasks and habits easy to read and tick.'),
+                          ModuleCard(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (extras.widgetBlockOn('tasks'))
+                                  _switchRow(
+                                      dark,
+                                      'Keep finished tasks in the list',
+                                      'Finished tasks sit below the open ones',
+                                      extras.widgetShowDoneTasks,
+                                      extras.setWidgetShowDoneTasks),
+                                const SizedBox(height: 8),
+                                Text('Tapping a row',
+                                    style: body(12.5, Surfaces.bodyText(dark),
+                                        weight: FontWeight.w600)),
+                                const SizedBox(height: 8),
+                                _chips(const [
+                                  ('open', 'Opens the app'),
+                                  ('tick', 'Ticks it off'),
+                                ], extras.widgetRowTap,
+                                    (v) => extras.setWidgetContent(rowTap: v)),
+                                const SizedBox(height: 14),
+                                Text('Rows to show',
+                                    style: body(12.5, Surfaces.bodyText(dark),
+                                        weight: FontWeight.w600)),
+                                const SizedBox(height: 8),
+                                _chips(const [
+                                  ('0', 'Fit the widget'),
+                                  ('3', '3'),
+                                  ('5', '5'),
+                                  ('8', '8'),
+                                ], '${extras.widgetMaxRows}',
+                                    (v) => extras.setWidgetContent(
+                                        maxRows: int.tryParse(v) ?? 0)),
+                              ],
+                            ),
+                          ),
+                        ],
+                        _title('LOOK', dark),
+                        SizedBox(
+                          height: 96,
+                          child: ListView.separated(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: kWidgetStyles.length,
+                            separatorBuilder: (_, __) => const SizedBox(width: 6),
+                            itemBuilder: (_, i) {
+                              final option = kWidgetStyles[i];
+                              return SizedBox(
+                                width: 84,
                                 child: _StyleSwatch(
                                   option: option,
                                   selected: extras.widgetStyle == option.key,
                                   onTap: () => extras.setWidgetStyle(option.key),
                                 ),
+                              );
+                            },
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        ModuleCard(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Accent colour',
+                                  style: body(12.5, Surfaces.bodyText(dark),
+                                      weight: FontWeight.w600)),
+                              const SizedBox(height: 10),
+                              Wrap(
+                                spacing: 10,
+                                runSpacing: 10,
+                                children: [
+                                  for (final a in kWidgetAccents)
+                                    _AccentDot(
+                                      label: a.$2,
+                                      color: a.$3 == 0 ? null : Color(a.$3),
+                                      selected: extras.widgetAccent == a.$1 ||
+                                          (a.$1 == 'auto' &&
+                                              extras.widgetAccent.isEmpty),
+                                      onTap: () => extras.setWidgetLook(
+                                          accent: a.$1 == 'auto' ? '' : a.$1),
+                                    ),
+                                ],
                               ),
-                          ],
+                              const SizedBox(height: 16),
+                              Text('Background opacity  ${extras.widgetOpacity}%',
+                                  style: body(12.5, Surfaces.bodyText(dark),
+                                      weight: FontWeight.w600)),
+                              Slider(
+                                value: extras.widgetOpacity.toDouble(),
+                                min: 30,
+                                max: 100,
+                                divisions: 14,
+                                activeColor: Surfaces.accent(dark),
+                                onChanged: (v) =>
+                                    extras.setWidgetLook(opacity: v.round()),
+                              ),
+                              Text('Text size',
+                                  style: body(12.5, Surfaces.bodyText(dark),
+                                      weight: FontWeight.w600)),
+                              const SizedBox(height: 8),
+                              _chips(const [
+                                ('small', 'Small'),
+                                ('medium', 'Medium'),
+                                ('large', 'Large'),
+                              ], extras.widgetTextSize,
+                                  (v) => extras.setWidgetLook(textSize: v)),
+                              const SizedBox(height: 8),
+                              _switchRow(
+                                  dark,
+                                  'Compact rows',
+                                  'Tighter spacing so more rows fit',
+                                  extras.widgetCompact,
+                                  (v) => extras.setWidgetLook(compact: v)),
+                            ],
+                          ),
+                        ),
+                        _title('HEADER', dark),
+                        ModuleCard(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Title',
+                                  style: body(12.5, Surfaces.bodyText(dark),
+                                      weight: FontWeight.w600)),
+                              const SizedBox(height: 8),
+                              _chips(const [
+                                ('app', 'Prakriyā'),
+                                ('greeting', 'Greeting'),
+                                ('day', 'Today'),
+                              ], extras.widgetTitleMode,
+                                  (v) => extras.setWidgetContent(titleMode: v)),
+                              const SizedBox(height: 8),
+                              _switchRow(
+                                  dark,
+                                  'Show the date',
+                                  'Weekday and date under the title',
+                                  extras.widgetShowDate,
+                                  (v) => extras.setWidgetContent(showDate: v)),
+                            ],
+                          ),
                         ),
                         const SizedBox(height: 24),
                         ModuleCard(
@@ -322,7 +551,7 @@ class _WidgetStudioScreenState extends State<WidgetStudioScreen> {
                                       weight: FontWeight.w700)),
                               const SizedBox(height: 8),
                               Text(
-                                  'On the widget, tap a circle to tick a task or habit. Tap a title to open your list. Tap + to add a task. Ticks are saved to the app the next time it opens. A taller widget shows more rows. It refreshes whenever you change something here, and about every 30 minutes on its own.',
+                                  'On the widget, tap a circle to tick a task or habit, and - or + to log water. Tap the title to open the app. Tap + to add a task. It moves to the new day by itself at midnight, and ticks are saved to the app the next time it opens. A taller widget shows more rows.',
                                   style: body(12.5, Surfaces.muted(dark))
                                       .copyWith(height: 1.45)),
                               const SizedBox(height: 10),
@@ -473,7 +702,7 @@ class _BlockRow extends StatelessWidget {
   }
 }
 
-/// An exact copy of what the home-screen widget draws, but live: ticks go
+/// A copy of what the home-screen widget draws, but live: ticks go
 /// straight to the store and tasks can be edited or added.
 class _WidgetPreview extends StatelessWidget {
   final WidgetSnapshot snap;
@@ -491,62 +720,84 @@ class _WidgetPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final style = widgetStyleFor(snap.style);
+    final style = widgetStyleFor(extras.widgetStyle);
+    final scale = widgetTextScale(extras.widgetTextSize);
     final text = Color(style.text);
     final muted = Color(style.muted);
-    final accent = Color(style.accent);
+    final accent = widgetAccentColor(style, extras.widgetAccent);
     final doneColor = Color(style.done);
+    final alpha = extras.widgetOpacity / 100.0;
+    final compact = extras.widgetCompact;
+    final tickMode = extras.widgetRowTap == 'tick';
+    final rowBg = style.light
+        ? const Color(0x0F000000)
+        : const Color(0x14FFFFFF);
+    final maxRows = extras.widgetMaxRows > 0 ? extras.widgetMaxRows : 8;
 
-    Widget header(String title, String count) => Padding(
-          padding: const EdgeInsets.only(top: 12, bottom: 2),
+    Widget header(String title, String count, [String more = '']) => Padding(
+          padding: EdgeInsets.only(top: compact ? 8 : 12, bottom: 4),
           child: Row(
             children: [
               Expanded(
                 child: Text(title,
-                    style: body(10.5, muted, weight: FontWeight.w800)),
+                    style: body(10.5 * scale, muted, weight: FontWeight.w800)),
               ),
-              Text(count, style: body(10.5, muted)),
+              Text(more.isEmpty ? count : '$count  $more',
+                  style: body(10.5 * scale, muted)),
             ],
           ),
         );
 
     Widget note(String message) => Padding(
-          padding: const EdgeInsets.only(top: 6),
-          child: Text(message, style: body(12, muted)),
+          padding: const EdgeInsets.only(top: 4),
+          child: Text(message, style: body(12 * scale, muted)),
         );
 
     Widget row({
       required bool done,
       required String name,
       required VoidCallback onTick,
-      VoidCallback? onTap,
+      required VoidCallback? onTitle,
     }) =>
-        Row(
-          children: [
-            InkWell(
-              borderRadius: BorderRadius.circular(16),
-              onTap: onTick,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(0, 6, 10, 6),
-                child: Icon(
-                    done ? Icons.check_circle_outline : Icons.radio_button_unchecked,
-                    size: 21,
-                    color: done ? doneColor : accent),
-              ),
-            ),
-            Expanded(
-              child: InkWell(
-                onTap: onTap,
+        Container(
+          margin: EdgeInsets.only(bottom: compact ? 2 : 4),
+          padding: const EdgeInsets.only(left: 8),
+          decoration: BoxDecoration(
+            color: rowBg,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(
+            children: [
+              InkWell(
+                borderRadius: BorderRadius.circular(16),
+                onTap: onTick,
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 6),
-                  child: Text(name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: body(13.5, done ? doneColor : text)),
+                  padding: EdgeInsets.fromLTRB(
+                      0, compact ? 4 : 8, 10, compact ? 4 : 8),
+                  child: Icon(
+                      done ? Icons.check_circle : Icons.radio_button_unchecked,
+                      size: 21 * scale,
+                      color: done ? doneColor : accent),
                 ),
               ),
-            ),
-          ],
+              Expanded(
+                child: InkWell(
+                  onTap: onTitle,
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(vertical: compact ? 4 : 8),
+                    child: Text(name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: body(14 * scale, done ? doneColor : text,
+                                weight: done ? FontWeight.w400 : FontWeight.w600)
+                            .copyWith(
+                                decoration:
+                                    done ? TextDecoration.lineThrough : null)),
+                  ),
+                ),
+              ),
+            ],
+          ),
         );
 
     final children = <Widget>[];
@@ -564,8 +815,8 @@ class _WidgetPreview extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(s.value,
-                              style: body(19, text, weight: FontWeight.w800)),
-                          Text(s.label, style: body(10.5, muted)),
+                              style: body(20 * scale, text, weight: FontWeight.w800)),
+                          Text(s.label, style: body(10.5 * scale, muted)),
                         ],
                       ),
                     ),
@@ -585,7 +836,7 @@ class _WidgetPreview extends StatelessWidget {
                       snap.done >= snap.total
                           ? 'Everything done today'
                           : '${snap.done} of ${snap.total} done today',
-                      style: body(11.5, muted)),
+                      style: body(11.5 * scale, muted)),
                   const SizedBox(height: 4),
                   ClipRRect(
                     borderRadius: BorderRadius.circular(4),
@@ -602,38 +853,116 @@ class _WidgetPreview extends StatelessWidget {
           }
           break;
         case 'tasks':
-          final shownTasks = snap.showDoneTasks
+          final pool = snap.showDoneTasks
               ? snap.tasks
               : snap.tasks.where((t) => !t.task.done).toList();
-          children.add(header('TO-DO',
-              snap.tasks.isEmpty ? '' : '${snap.tasksDone}/${snap.tasks.length}'));
-          if (shownTasks.isEmpty) {
+          final shown = pool.take(maxRows).toList();
+          final hidden = pool.length - shown.length;
+          children.add(header(
+              'TO-DO',
+              snap.tasks.isEmpty ? '' : '${snap.tasksDone}/${snap.tasks.length}',
+              hidden > 0 ? '+$hidden more' : ''));
+          if (shown.isEmpty) {
             children.add(note(snap.tasks.isEmpty
                 ? 'No tasks yet. Tap + to add one.'
                 : 'All done. Nicely done.'));
           }
-          for (final line in shownTasks) {
+          for (final line in shown) {
             children.add(row(
               done: line.task.done,
               name: line.task.title,
               onTick: () => onToggleTask(line),
-              onTap: () => onEditTask(line),
+              onTitle: tickMode
+                  ? () => onToggleTask(line)
+                  : () => onEditTask(line),
             ));
           }
           break;
         case 'habits':
-          children.add(header('HABITS',
-              snap.habits.isEmpty ? '' : '${snap.habitsDone}/${snap.habits.length}'));
+          final shown = snap.habits.take(maxRows).toList();
+          final hidden = snap.habits.length - shown.length;
+          children.add(header(
+              'HABITS',
+              snap.habits.isEmpty ? '' : '${snap.habitsDone}/${snap.habits.length}',
+              hidden > 0 ? '+$hidden more' : ''));
           if (snap.habits.isEmpty) {
             children.add(note('No habits selected. Pick some below.'));
           }
-          for (final line in snap.habits) {
+          for (final line in shown) {
             children.add(row(
               done: line.done,
               name: line.habit.name,
               onTick: () => onToggleHabit(line.habit),
+              onTitle: tickMode ? () => onToggleHabit(line.habit) : null,
             ));
           }
+          break;
+        case 'water':
+          children.add(Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              decoration: BoxDecoration(
+                color: rowBg,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                children: [
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () => extras.changeWater(-1),
+                    icon: Icon(Icons.remove_circle_outline, color: accent),
+                  ),
+                  Expanded(
+                    child: Text(
+                        'Water  ${snap.water} / ${snap.waterGoal} glasses',
+                        textAlign: TextAlign.center,
+                        style: body(13 * scale, text, weight: FontWeight.w600)),
+                  ),
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () => extras.changeWater(1),
+                    icon: Icon(Icons.add_circle_outline, color: accent),
+                  ),
+                ],
+              ),
+            ),
+          ));
+          break;
+        case 'week':
+          children.add(Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: Row(
+              children: [
+                for (final d in snap.week)
+                  Expanded(
+                    child: Column(
+                      children: [
+                        Text(d.letter,
+                            style: body(10.5 * scale, d.today ? text : muted,
+                                weight: d.today ? FontWeight.w800 : FontWeight.w500)),
+                        const SizedBox(height: 4),
+                        Container(
+                          width: 14,
+                          height: 14,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: d.percent >= 100
+                                ? accent
+                                : (d.percent > 0
+                                    ? accent.withValues(alpha: 0.5)
+                                    : muted.withValues(alpha: 0.3)),
+                            border: d.today
+                                ? Border.all(color: text, width: 1.5)
+                                : null,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ));
           break;
         case 'mantra':
           if (snap.mantra.isNotEmpty) {
@@ -642,7 +971,8 @@ class _WidgetPreview extends StatelessWidget {
               child: Text('“${snap.mantra}”',
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: body(12.5, text).copyWith(fontStyle: FontStyle.italic)),
+                  style: body(12.5 * scale, text)
+                      .copyWith(fontStyle: FontStyle.italic)),
             ));
           }
           break;
@@ -655,10 +985,13 @@ class _WidgetPreview extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(style.bgStart), Color(style.bgEnd)],
+          colors: [
+            Color(style.bgStart).withValues(alpha: alpha),
+            Color(style.bgEnd).withValues(alpha: alpha),
+          ],
         ),
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: Color(style.border)),
+        border: Border.all(color: Color(style.border).withValues(alpha: alpha)),
         boxShadow: const [
           BoxShadow(color: Color(0x33000000), blurRadius: 14, offset: Offset(0, 6)),
         ],
@@ -672,9 +1005,13 @@ class _WidgetPreview extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Prakriyā',
-                        style: body(15, Color(style.title), weight: FontWeight.w800)),
-                    Text(snap.dateLabel, style: body(10.5, muted)),
+                    Text(snap.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: body(15 * scale, Color(style.title),
+                            weight: FontWeight.w800)),
+                    if (extras.widgetShowDate)
+                      Text(snap.dateLabel, style: body(10.5 * scale, muted)),
                   ],
                 ),
               ),
@@ -696,6 +1033,50 @@ class _WidgetPreview extends StatelessWidget {
                   style: body(12, muted)),
             ),
         ],
+      ),
+    );
+  }
+}
+
+class _AccentDot extends StatelessWidget {
+  final String label;
+  final Color? color;
+  final bool selected;
+  final VoidCallback onTap;
+  const _AccentDot({
+    required this.label,
+    required this.color,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return Semantics(
+      label: '$label accent',
+      button: true,
+      selected: selected,
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onTap,
+        child: Container(
+          width: 34,
+          height: 34,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: color,
+            border: Border.all(
+              color: selected ? Surfaces.heading(dark) : Surfaces.accentBorder(dark),
+              width: selected ? 3 : 1,
+            ),
+          ),
+          child: color == null
+              ? Icon(Icons.auto_awesome, size: 16, color: Surfaces.muted(dark))
+              : (selected
+                  ? const Icon(Icons.check, size: 16, color: Colors.white)
+                  : null),
+        ),
       ),
     );
   }

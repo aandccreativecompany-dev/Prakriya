@@ -17,15 +17,15 @@
             android:layout_height="wrap_content"
             android:maxLines="1"
             android:textColor="#F4EEFF"
-            android:textSize="18sp"
+            android:textSize="20sp"
             android:textStyle="bold" />
         <TextView
             android:id="@+id/stat_l1"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:maxLines="1"
-            android:textColor="#A99BD0"
-            android:textSize="10sp" />
+            android:textColor="#B4A8DA"
+            android:textSize="11sp" />
     </LinearLayout>
 
     <LinearLayout
@@ -40,15 +40,15 @@
             android:layout_height="wrap_content"
             android:maxLines="1"
             android:textColor="#F4EEFF"
-            android:textSize="18sp"
+            android:textSize="20sp"
             android:textStyle="bold" />
         <TextView
             android:id="@+id/stat_l2"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:maxLines="1"
-            android:textColor="#A99BD0"
-            android:textSize="10sp" />
+            android:textColor="#B4A8DA"
+            android:textSize="11sp" />
     </LinearLayout>
 
     <LinearLayout
@@ -63,15 +63,15 @@
             android:layout_height="wrap_content"
             android:maxLines="1"
             android:textColor="#F4EEFF"
-            android:textSize="18sp"
+            android:textSize="20sp"
             android:textStyle="bold" />
         <TextView
             android:id="@+id/stat_l3"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:maxLines="1"
-            android:textColor="#A99BD0"
-            android:textSize="10sp" />
+            android:textColor="#B4A8DA"
+            android:textSize="11sp" />
     </LinearLayout>
 
     <LinearLayout
@@ -86,14 +86,14 @@
             android:layout_height="wrap_content"
             android:maxLines="1"
             android:textColor="#F4EEFF"
-            android:textSize="18sp"
+            android:textSize="20sp"
             android:textStyle="bold" />
         <TextView
             android:id="@+id/stat_l4"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:maxLines="1"
-            android:textColor="#A99BD0"
-            android:textSize="10sp" />
+            android:textColor="#B4A8DA"
+            android:textSize="11sp" />
     </LinearLayout>
 </LinearLayout>
