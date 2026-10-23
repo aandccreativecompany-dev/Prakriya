@@ -1180,8 +1180,12 @@ class _ScriptingItem extends StatelessWidget {
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(count == 0 ? 'Not started' : '$count written',
-                style: body(12, Surfaces.muted(dark))),
+            Flexible(
+              child: Text(count == 0 ? 'Not started' : '$count written',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: body(12, Surfaces.muted(dark))),
+            ),
             const SizedBox(width: 6),
             Icon(Icons.chevron_right, color: Surfaces.muted(dark), size: 18),
           ],
@@ -1210,8 +1214,12 @@ class _EveningReflectionItem extends StatelessWidget {
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(done ? 'Written for today' : 'Not written yet',
-                style: body(12, Surfaces.muted(dark))),
+            Flexible(
+              child: Text(done ? 'Done today' : 'Not yet',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: body(12, Surfaces.muted(dark))),
+            ),
             if (store.hasPin) ...[
               const SizedBox(width: 6),
               Icon(Icons.lock_outline, size: 15, color: Surfaces.muted(dark)),
@@ -1242,8 +1250,12 @@ class _VisionBoardItem extends StatelessWidget {
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(count == 0 ? 'Nothing pinned yet' : '$count pinned',
-                style: body(12, Surfaces.muted(dark))),
+            Flexible(
+              child: Text(count == 0 ? 'Nothing pinned yet' : '$count pinned',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: body(12, Surfaces.muted(dark))),
+            ),
             const SizedBox(width: 6),
             Icon(Icons.chevron_right, color: Surfaces.muted(dark), size: 18),
           ],
@@ -1273,8 +1285,12 @@ class _MindMapItem extends StatelessWidget {
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('Day · week · month',
-                style: body(12, Surfaces.muted(dark))),
+            Flexible(
+              child: Text('Day · week · month',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: body(12, Surfaces.muted(dark))),
+            ),
             const SizedBox(width: 6),
             Icon(Icons.chevron_right, color: Surfaces.muted(dark), size: 18),
           ],

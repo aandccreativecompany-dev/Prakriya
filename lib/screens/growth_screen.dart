@@ -22,6 +22,7 @@ Future<void> maybeCelebratePlant(BuildContext context) async {
   try {
     final snap = GrowthEngine.current();
     final stage = snap.stage.index;
+    final cs = companionStage(extras.companion, stage);
     if (stage <= extras.plantStageSeen) return;
     extras.markPlantStageSeen(stage);
     if (stage == 0 || !context.mounted) return;
@@ -31,15 +32,17 @@ Future<void> maybeCelebratePlant(BuildContext context) async {
         final dark = Theme.of(ctx).brightness == Brightness.dark;
         return AlertDialog(
           backgroundColor: Surfaces.sheet(dark),
-          title: Text('Your plant grew!', style: display(20, Surfaces.heading(dark))),
+          title: Text(
+              extras.companion == 'bird' ? 'Your bird grew!' : 'Your plant grew!',
+              style: display(20, Surfaces.heading(dark))),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              GrowthPlant(stage: stage, height: 150),
+              GrowthCompanion(kind: extras.companion, stage: stage, height: 150),
               const SizedBox(height: 8),
-              Text(snap.stage.name, style: display(18, Surfaces.accent(dark))),
+              Text(cs.name, style: display(18, Surfaces.accent(dark))),
               const SizedBox(height: 4),
-              Text(snap.stage.blurb,
+              Text(cs.blurb,
                   textAlign: TextAlign.center,
                   style: body(13, Surfaces.bodyText(dark))),
             ],
@@ -94,7 +97,7 @@ class _GrowthScreenState extends State<GrowthScreen> {
                   ScreenHeader(
                     icon: Icons.spa_outlined,
                     title: 'My Growth',
-                    subtitle: 'Your plant grows as you tend your day',
+                    subtitle: 'Your companion grows as you tend your day',
                     actions: [
                       IconButton(
                         tooltip: 'Share',
@@ -108,6 +111,8 @@ class _GrowthScreenState extends State<GrowthScreen> {
                     padding: const EdgeInsets.symmetric(horizontal: 20),
                     child: Column(
                       children: [
+                        const _CompanionPicker(),
+                        const SizedBox(height: 12),
                         RepaintBoundary(
                           key: _shareKey,
                           child: _PlantCard(snap: snap),
@@ -144,7 +149,9 @@ class _GrowthScreenState extends State<GrowthScreen> {
       await file.writeAsBytes(data.buffer.asUint8List());
       await SharePlus.instance.share(ShareParams(
         files: [XFile(file.path)],
-        text: 'My plant on Prakriyā',
+        text: extras.companion == 'bird'
+            ? 'My bird on Prakriyā'
+            : 'My plant on Prakriyā',
       ));
     } catch (_) {
       if (context.mounted) {
@@ -155,6 +162,39 @@ class _GrowthScreenState extends State<GrowthScreen> {
   }
 }
 
+
+const _dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const _monthNames = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+];
+
+String _dateText(DateTime d) =>
+    '${_dayNames[d.weekday - 1]}, ${d.day} ${_monthNames[d.month - 1]}';
+
+/// Tree or bird — progress is shared, so switching never loses anything.
+class _CompanionPicker extends StatelessWidget {
+  const _CompanionPicker();
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      child: SegmentedButton<String>(
+        segments: const [
+          ButtonSegment<String>(
+              value: 'tree', label: Text('Tree'), icon: Icon(Icons.park_outlined)),
+          ButtonSegment<String>(
+              value: 'bird', label: Text('Bird'), icon: Icon(Icons.flutter_dash)),
+        ],
+        selected: {extras.companion},
+        showSelectedIcon: false,
+        onSelectionChanged: (v) => extras.setCompanion(v.first),
+      ),
+    );
+  }
+}
+
 class _PlantCard extends StatelessWidget {
   final GrowthSnapshot snap;
   const _PlantCard({required this.snap});
@@ -162,19 +202,28 @@ class _PlantCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
+    final kind = extras.companion;
+    final cs = companionStage(kind, snap.stage.index);
     final next = snap.next;
+    final nextName =
+        next == null ? '' : companionStage(kind, next.index).name.toLowerCase();
     return ModuleCard(
       accent: true,
       child: Column(
         children: [
-          Center(child: GrowthPlant(stage: snap.stage.index, thirsty: snap.thirsty)),
+          Center(
+            child: GrowthCompanion(
+                kind: kind, stage: snap.stage.index, idle: snap.thirsty),
+          ),
           const SizedBox(height: 6),
-          Text(snap.stage.name, style: display(22, Surfaces.heading(dark))),
+          Text(cs.name, style: display(22, Surfaces.heading(dark))),
           const SizedBox(height: 4),
           Text(
             snap.thirsty
-                ? 'Your plant is thirsty — one small action and it perks up.'
-                : snap.stage.blurb,
+                ? (kind == 'bird'
+                    ? 'Your bird is sleepy — one small action wakes it up.'
+                    : 'Your plant is thirsty — one small action and it perks up.')
+                : cs.blurb,
             textAlign: TextAlign.center,
             style: body(13, Surfaces.bodyText(dark)),
           ),
@@ -192,7 +241,7 @@ class _PlantCard extends StatelessWidget {
           Text(
             next == null
                 ? 'Fully grown — keep it flourishing'
-                : '${next.minPoints - snap.points} growth points to ${next.name}',
+                : '${next.minPoints - snap.points} growth points to become a $nextName',
             style: body(12, Surfaces.muted(dark)),
           ),
           const SizedBox(height: 12),
@@ -230,60 +279,192 @@ class _Stat extends StatelessWidget {
   }
 }
 
-class _WheelCard extends StatelessWidget {
+const Map<String, String> _axisTips = {
+  'habits': 'Tick one habit you can finish in two minutes.',
+  'priorities': 'Pick one priority for today and do it first.',
+  'mind': 'Log your mood, or take a one-minute breathing break.',
+  'body': 'Log a meal and a glass of water.',
+  'connect': 'Message someone you have not spoken to lately.',
+  'money': 'Set a monthly budget in Finance to light this up.',
+};
+
+/// Tap the wheel to inspect any area: its 7-day score, a tiny day-by-day bar
+/// strip, and one suggested next step.
+class _WheelCard extends StatefulWidget {
   final GrowthSnapshot snap;
   const _WheelCard({required this.snap});
 
   @override
+  State<_WheelCard> createState() => _WheelCardState();
+}
+
+class _WheelCardState extends State<_WheelCard> {
+  String? _selKey;
+
+  String get _activeKey =>
+      _selKey ?? widget.snap.weakest?.key ?? widget.snap.wheel.first.key;
+
+  void _pick(Offset local, Size size) {
+    final axes = widget.snap.wheel;
+    final n = axes.length;
+    final center = Offset(size.width / 2, size.height / 2);
+    final d = local - center;
+    if (d.distance < 12) return;
+    var a = math.atan2(d.dy, d.dx) + math.pi / 2;
+    final step = 2 * math.pi / n;
+    while (a < 0) {
+      a += 2 * math.pi;
+    }
+    final idx = (a / step).round() % n;
+    setState(() => _selKey = axes[idx].key);
+  }
+
+  @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
-    final weak = snap.weakest;
-    final strong = snap.strongest;
+    final snap = widget.snap;
+    final axes = snap.wheel;
+    final key = _activeKey;
+    var selIndex = axes.indexWhere((a) => a.key == key);
+    if (selIndex < 0) selIndex = 0;
+    final axis = axes[selIndex];
+    final daily = snap.axisDaily(axis.key);
+    final week = snap.recent.length <= 7
+        ? snap.recent
+        : snap.recent.sublist(snap.recent.length - 7);
+
     return ModuleCard(
       eyebrow: 'Balance wheel · last 7 days',
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           AspectRatio(
             aspectRatio: 1.1,
-            child: CustomPaint(
-              painter: BalanceWheelPainter(
-                axes: snap.wheel,
-                accent: Surfaces.accent(dark),
-                grid: Surfaces.muted(dark).withValues(alpha: 0.35),
-                text: Surfaces.bodyText(dark),
-                muted: Surfaces.muted(dark),
+            child: LayoutBuilder(
+              builder: (context, c) {
+                final size = Size(c.maxWidth, c.maxHeight);
+                return GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTapDown: (d) => _pick(d.localPosition, size),
+                  child: CustomPaint(
+                    size: size,
+                    painter: BalanceWheelPainter(
+                      axes: axes,
+                      selected: selIndex,
+                      accent: Surfaces.accent(dark),
+                      grid: Surfaces.muted(dark).withValues(alpha: 0.35),
+                      text: Surfaces.bodyText(dark),
+                      muted: Surfaces.muted(dark),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          Center(
+            child: Text('Tap an area to explore it',
+                style: body(11.5, Surfaces.muted(dark))),
+          ),
+          const SizedBox(height: 10),
+          AnimatedSize(
+            duration: const Duration(milliseconds: 200),
+            alignment: Alignment.topCenter,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Surfaces.accent(dark).withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(axis.label,
+                            style: display(17, Surfaces.heading(dark))),
+                      ),
+                      Text(axis.tracked ? '${(axis.value * 100).round()}%' : '—',
+                          style: display(17, Surfaces.accent(dark))),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(_axisTips[axis.key] ?? '',
+                      style: body(12.5, Surfaces.bodyText(dark))),
+                  if (daily.length == week.length && daily.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      height: 56,
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          for (var i = 0; i < daily.length; i++)
+                            Expanded(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.end,
+                                children: [
+                                  Container(
+                                    height: 4 + 30 * daily[i].clamp(0.0, 1.0).toDouble(),
+                                    margin: const EdgeInsets.symmetric(horizontal: 5),
+                                    decoration: BoxDecoration(
+                                      color: Surfaces.accent(dark)
+                                          .withValues(alpha: daily[i] > 0 ? 0.9 : 0.25),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(_dayNames[week[i].day.weekday - 1].substring(0, 1),
+                                      style: body(10.5, Surfaces.muted(dark))),
+                                ],
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ),
           ),
-          const SizedBox(height: 8),
-          if (strong != null && weak != null && strong.key != weak.key)
-            Text(
-              'Strongest: ${strong.label}. Tend next: ${weak.label}.',
-              textAlign: TextAlign.center,
-              style: body(13, Surfaces.bodyText(dark)),
-            )
-          else
-            Text('Do a little in each area and the wheel fills out.',
-                textAlign: TextAlign.center,
-                style: body(13, Surfaces.bodyText(dark))),
-          if (snap.wheel.any((a) => !a.tracked)) ...[
-            const SizedBox(height: 4),
-            Text('Set a monthly budget in Finance to light up Money.',
-                textAlign: TextAlign.center, style: body(11.5, Surfaces.muted(dark))),
-          ],
         ],
       ),
     );
   }
 }
 
-class _CurveCard extends StatelessWidget {
+/// Touch or drag along the chart to read any day.
+class _CurveCard extends StatefulWidget {
   final GrowthSnapshot snap;
   const _CurveCard({required this.snap});
 
   @override
+  State<_CurveCard> createState() => _CurveCardState();
+}
+
+class _CurveCardState extends State<_CurveCard> {
+  int? _sel;
+
+  void _pick(double dx, double width) {
+    final n = widget.snap.daily.length;
+    if (n == 0) return;
+    final slot = (width - GrowthCurvePainter.left - GrowthCurvePainter.right) / n;
+    if (slot <= 0) return;
+    final i = ((dx - GrowthCurvePainter.left) / slot).floor().clamp(0, n - 1).toInt();
+    if (i != _sel) setState(() => _sel = i);
+  }
+
+  @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
+    final snap = widget.snap;
+    final n = snap.daily.length;
+    final idx = n == 0 ? 0 : (_sel ?? n - 1).clamp(0, n - 1).toInt();
+    final markers = [
+      for (var i = 0; i < snap.dailyDays.length; i++)
+        if (snap.stageUps.containsKey(dayKey(snap.dailyDays[i]))) i,
+    ];
+
     return ModuleCard(
       eyebrow: 'Growth curve · last 30 days',
       child: Column(
@@ -292,23 +473,134 @@ class _CurveCard extends StatelessWidget {
           SizedBox(
             height: 150,
             width: double.infinity,
-            child: CustomPaint(
-              painter: GrowthCurvePainter(
-                daily: snap.daily,
-                smooth: snap.smooth,
-                markers: [
-                  for (var i = 0; i < snap.dailyDays.length; i++)
-                    if (snap.stageUps.containsKey(dayKey(snap.dailyDays[i]))) i,
-                ],
-                accent: Surfaces.accent(dark),
-                grid: Surfaces.muted(dark).withValues(alpha: 0.25),
-                muted: Surfaces.muted(dark),
-              ),
+            child: LayoutBuilder(
+              builder: (context, c) {
+                return GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTapDown: (d) => _pick(d.localPosition.dx, c.maxWidth),
+                  onHorizontalDragStart: (d) => _pick(d.localPosition.dx, c.maxWidth),
+                  onHorizontalDragUpdate: (d) => _pick(d.localPosition.dx, c.maxWidth),
+                  child: CustomPaint(
+                    size: Size(c.maxWidth, c.maxHeight),
+                    painter: GrowthCurvePainter(
+                      daily: snap.daily,
+                      smooth: snap.smooth,
+                      markers: markers,
+                      selected: idx,
+                      accent: Surfaces.accent(dark),
+                      grid: Surfaces.muted(dark).withValues(alpha: 0.25),
+                      muted: Surfaces.muted(dark),
+                    ),
+                  ),
+                );
+              },
             ),
           ),
+          const SizedBox(height: 8),
+          if (n == 0)
+            Text('Your curve appears after your first day.',
+                style: body(12, Surfaces.muted(dark)))
+          else
+            _DayInfo(
+              facts: snap.recent[idx],
+              score: snap.daily[idx],
+              avg: snap.smooth[idx],
+              stageUp: snap.stageUps[dayKey(snap.recent[idx].day)],
+              isToday: idx == n - 1,
+            ),
           const SizedBox(height: 6),
-          Text('Bars are each day; the line is your 7-day average. Dots mark growth stages.',
+          Text('Touch or slide along the chart to look at any day.',
               style: body(11.5, Surfaces.muted(dark))),
+        ],
+      ),
+    );
+  }
+}
+
+class _DayInfo extends StatelessWidget {
+  final DayFacts facts;
+  final double score;
+  final double avg;
+  final int? stageUp;
+  final bool isToday;
+  const _DayInfo({
+    required this.facts,
+    required this.score,
+    required this.avg,
+    required this.stageUp,
+    required this.isToday,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final chips = <String>[
+      if (facts.habitsTotal > 0) 'Habits ${facts.habitsDone}/${facts.habitsTotal}',
+      if (facts.tasksTotal > 0) 'Priorities ${facts.tasksDone}/${facts.tasksTotal}',
+      if (facts.moodLogged) 'Mood logged',
+      if (facts.journaled) 'Reflection',
+      if (facts.mindActions > 0) 'Mind ×${facts.mindActions}',
+      if (facts.mealsLogged > 0) 'Meals ×${facts.mealsLogged}',
+      if (facts.waterLogged) 'Water',
+      if (facts.contacted) 'Reached out',
+    ];
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Surfaces.accent(dark).withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(isToday ? 'Today · ${_dateText(facts.day)}' : _dateText(facts.day),
+                    style: body(13, Surfaces.heading(dark), weight: FontWeight.w700)),
+              ),
+              Text('${(score * 100).round()}%',
+                  style: display(18, Surfaces.accent(dark))),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Text('7-day average ${(avg * 100).round()}%',
+              style: body(11.5, Surfaces.muted(dark))),
+          if (stageUp != null) ...[
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Icon(Icons.auto_awesome, size: 14, color: Surfaces.accent(dark)),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                      'Growth milestone: reached ${companionStage(extras.companion, stageUp!).name}',
+                      style: body(12, Surfaces.accentText(dark), weight: FontWeight.w600)),
+                ),
+              ],
+            ),
+          ],
+          const SizedBox(height: 8),
+          if (chips.isEmpty)
+            Text('Nothing logged this day.', style: body(12, Surfaces.muted(dark)))
+          else
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                for (final c in chips)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Surfaces.card(dark),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Surfaces.cardBorder(dark)),
+                    ),
+                    child: Text(c, style: body(11, Surfaces.bodyText(dark))),
+                  ),
+              ],
+            ),
         ],
       ),
     );
@@ -322,18 +614,21 @@ class _LadderCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
+    final kind = extras.companion;
+    final stages = kind == 'bird' ? kBirdStages : kPlantStages;
     return ModuleCard(
-      eyebrow: 'How your plant grows',
+      eyebrow: 'How your ${kind == 'bird' ? 'bird' : 'plant'} grows',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             'Every day you tend habits, priorities, mind, body and connections earns up to 100 growth points. '
-            'Quiet days never shrink your plant — it just gets thirsty until you return.',
+            'Quiet days never shrink your ${kind == 'bird' ? 'bird' : 'plant'} — '
+            '${kind == 'bird' ? 'it just naps' : 'it just gets thirsty'} until you return.',
             style: body(12.5, Surfaces.bodyText(dark)),
           ),
           const SizedBox(height: 12),
-          for (final s in kPlantStages)
+          for (final s in stages)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 4),
               child: Row(
@@ -361,15 +656,17 @@ class _LadderCard extends StatelessWidget {
   }
 }
 
-/// Radar chart of the six life areas.
+/// Radar chart of the six life areas; [selected] is drawn emphasised.
 class BalanceWheelPainter extends CustomPainter {
   final List<WheelAxis> axes;
+  final int selected;
   final Color accent;
   final Color grid;
   final Color text;
   final Color muted;
   BalanceWheelPainter({
     required this.axes,
+    required this.selected,
     required this.accent,
     required this.grid,
     required this.text,
@@ -407,7 +704,14 @@ class BalanceWheelPainter extends CustomPainter {
       canvas.drawPath(path, gridPaint);
     }
     for (var i = 0; i < n; i++) {
-      canvas.drawLine(center, point(i, 1), gridPaint);
+      canvas.drawLine(
+          center,
+          point(i, 1),
+          i == selected
+              ? (Paint()
+                ..color = accent.withValues(alpha: 0.7)
+                ..strokeWidth = 2)
+              : gridPaint);
     }
 
     final shape = Path();
@@ -429,19 +733,27 @@ class BalanceWheelPainter extends CustomPainter {
           ..strokeWidth = 2.2
           ..strokeJoin = StrokeJoin.round);
     for (var i = 0; i < n; i++) {
-      canvas.drawCircle(
-          point(i, axes[i].value.clamp(0.04, 1.0).toDouble()), 3.5, Paint()..color = accent);
+      final o = point(i, axes[i].value.clamp(0.04, 1.0).toDouble());
+      if (i == selected) {
+        canvas.drawCircle(o, 9, Paint()..color = accent.withValues(alpha: 0.25));
+        canvas.drawCircle(o, 5.5, Paint()..color = accent);
+      } else {
+        canvas.drawCircle(o, 3.5, Paint()..color = accent);
+      }
     }
 
     for (var i = 0; i < n; i++) {
       final axis = axes[i];
+      final isSel = i == selected;
       final pct = axis.tracked ? '${(axis.value * 100).round()}%' : '—';
       final tp = TextPainter(
         text: TextSpan(children: [
           TextSpan(
               text: '${axis.label}\n',
               style: TextStyle(
-                  color: text, fontSize: 12, fontWeight: FontWeight.w600)),
+                  color: isSel ? accent : text,
+                  fontSize: isSel ? 13 : 12,
+                  fontWeight: isSel ? FontWeight.w800 : FontWeight.w600)),
           TextSpan(text: pct, style: TextStyle(color: muted, fontSize: 11)),
         ]),
         textAlign: TextAlign.center,
@@ -454,14 +766,22 @@ class BalanceWheelPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant BalanceWheelPainter old) =>
-      old.axes != axes || old.accent != accent || old.text != text;
+      old.axes != axes ||
+      old.selected != selected ||
+      old.accent != accent ||
+      old.text != text;
 }
 
-/// Daily bars with a smoothed 7-day line over the top.
+/// Daily bars with a smoothed 7-day line and a movable inspector.
 class GrowthCurvePainter extends CustomPainter {
+  static const double left = 4;
+  static const double right = 4;
+  static const double _bottom = 18;
+
   final List<double> daily;
   final List<double> smooth;
   final List<int> markers;
+  final int selected;
   final Color accent;
   final Color grid;
   final Color muted;
@@ -469,6 +789,7 @@ class GrowthCurvePainter extends CustomPainter {
     required this.daily,
     required this.smooth,
     required this.markers,
+    required this.selected,
     required this.accent,
     required this.grid,
     required this.muted,
@@ -477,10 +798,8 @@ class GrowthCurvePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     if (daily.isEmpty) return;
-    const left = 4.0;
-    const bottom = 18.0;
-    final w = size.width - left - 4;
-    final h = size.height - bottom - 6;
+    final w = size.width - left - right;
+    final h = size.height - _bottom - 6;
     if (w <= 0 || h <= 0) return;
 
     final gridPaint = Paint()
@@ -494,6 +813,7 @@ class GrowthCurvePainter extends CustomPainter {
     final n = daily.length;
     final slot = w / n;
     final barPaint = Paint()..color = accent.withValues(alpha: 0.28);
+    final barSel = Paint()..color = accent.withValues(alpha: 0.6);
     for (var i = 0; i < n; i++) {
       final v = daily[i].clamp(0.0, 1.0).toDouble();
       final bh = math.max(2.0, h * v);
@@ -501,7 +821,7 @@ class GrowthCurvePainter extends CustomPainter {
       canvas.drawRRect(
         RRect.fromRectAndRadius(
             Rect.fromLTWH(x, 6 + h - bh, slot * 0.7, bh), const Radius.circular(2)),
-        barPaint,
+        i == selected ? barSel : barPaint,
       );
     }
 
@@ -526,6 +846,18 @@ class GrowthCurvePainter extends CustomPainter {
         canvas.drawCircle(at(m), 5.5, Paint()..color = Colors.white);
         canvas.drawCircle(at(m), 4, Paint()..color = accent);
       }
+      if (selected >= 0 && selected < n) {
+        final p = at(selected);
+        canvas.drawLine(
+            Offset(p.dx, 4),
+            Offset(p.dx, 6 + h),
+            Paint()
+              ..color = accent.withValues(alpha: 0.55)
+              ..strokeWidth = 1.5);
+        canvas.drawCircle(p, 8, Paint()..color = accent.withValues(alpha: 0.25));
+        canvas.drawCircle(p, 5, Paint()..color = accent);
+        canvas.drawCircle(p, 2, Paint()..color = Colors.white);
+      }
     }
 
     void label(String s, double x, TextAlign align) {
@@ -543,5 +875,8 @@ class GrowthCurvePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant GrowthCurvePainter old) =>
-      old.daily != daily || old.smooth != smooth || old.accent != accent;
+      old.daily != daily ||
+      old.smooth != smooth ||
+      old.selected != selected ||
+      old.accent != accent;
 }

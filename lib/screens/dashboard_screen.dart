@@ -527,9 +527,10 @@ class _GrowthCard extends StatelessWidget {
             padding: const EdgeInsets.all(14),
             child: Row(
               children: [
-                GrowthPlant(
+                GrowthCompanion(
+                    kind: extras.companion,
                     stage: snap.stage.index,
-                    thirsty: snap.thirsty,
+                    idle: snap.thirsty,
                     height: 86,
                     animate: false),
                 const SizedBox(width: 12),
@@ -537,14 +538,17 @@ class _GrowthCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('YOUR PLANT', style: label(Surfaces.eyebrow(dark))),
+                      Text(extras.companion == 'bird' ? 'YOUR BIRD' : 'YOUR PLANT',
+                          style: label(Surfaces.eyebrow(dark))),
                       const SizedBox(height: 4),
-                      Text(snap.stage.name,
+                      Text(companionStage(extras.companion, snap.stage.index).name,
                           style: display(18, Surfaces.heading(dark))),
                       const SizedBox(height: 2),
                       Text(
                         snap.thirsty
-                            ? 'Thirsty — one small action perks it up'
+                            ? (extras.companion == 'bird'
+                                ? 'Sleepy — one small action wakes it up'
+                                : 'Thirsty — one small action perks it up')
                             : weak != null && snap.activeDaysThisWeek > 0
                                 ? 'Tend ${weak.label.toLowerCase()} next'
                                 : 'Complete a task to start growing',

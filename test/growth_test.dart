@@ -75,4 +75,26 @@ void main() {
     final snap = GrowthEngine.build(facts);
     expect(snap.stageUps.isNotEmpty, isTrue);
   });
+
+  test('the bird and the tree share stages but use their own names', () {
+    expect(kBirdStages.length, kPlantStages.length);
+    for (var i = 0; i < kPlantStages.length; i++) {
+      expect(kBirdStages[i].minPoints, kPlantStages[i].minPoints);
+    }
+    expect(companionStage('bird', 0).name, 'Egg');
+    expect(companionStage('tree', 0).name, 'Seed');
+    expect(companionStage('bird', 99).name, kBirdStages.last.name);
+    expect(companionStage('tree', -3).name, kPlantStages.first.name);
+  });
+
+  test('per-axis daily values line up with the last seven days', () {
+    final facts = <DayFacts>[
+      for (var i = 0; i < 10; i++) day(i, habits: i.isEven ? 4 : 0, contacted: i == 9),
+    ];
+    final snap = GrowthEngine.build(facts);
+    expect(snap.recent.length, 10);
+    expect(snap.axisDaily('habits').length, 7);
+    expect(snap.axisDaily('connect').last, 1.0);
+    expect(snap.axisDaily('money'), isEmpty);
+  });
 }

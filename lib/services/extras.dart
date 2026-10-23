@@ -42,6 +42,9 @@ class Extras extends ChangeNotifier {
   /// Day keys on which the user marked someone as contacted (Connect).
   final List<String> contactDays = <String>[];
 
+  /// Which companion grows with the user's progress: 'tree' or 'bird'.
+  String companion = 'tree';
+
   /// Highest growth-plant stage whose celebration has already been shown.
   int plantStageSeen = 0;
 
@@ -117,6 +120,9 @@ class Extras extends ChangeNotifier {
           contactDays
             ..clear()
             ..addAll(cd ?? const <String>[]);
+          if (decoded['companion'] == 'bird' || decoded['companion'] == 'tree') {
+            companion = decoded['companion'] as String;
+          }
           final ps = decoded['plantStageSeen'];
           if (ps is num) plantStageSeen = ps.toInt();
           entryNutrients.clear();
@@ -265,6 +271,7 @@ class Extras extends ChangeNotifier {
           'meditationMinutes': meditationMinutes,
           'contactDays': contactDays,
           'plantStageSeen': plantStageSeen,
+          'companion': companion,
           'entryNutrients': entryNutrients,
           'calorieGoal': calorieGoal,
           'female': female,
@@ -521,6 +528,13 @@ class Extras extends ChangeNotifier {
     if (contactDays.length > 400) {
       contactDays.removeRange(0, contactDays.length - 400);
     }
+    _changed();
+  }
+
+  void setCompanion(String kind) {
+    if (kind != 'tree' && kind != 'bird') return;
+    if (companion == kind) return;
+    companion = kind;
     _changed();
   }
 

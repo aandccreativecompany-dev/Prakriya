@@ -75,6 +75,25 @@ const List<PlantStage> kPlantStages = [
   PlantStage(6, 'Fruiting tree', 'Rooted, full and generous. Keep tending it.', 2400),
 ];
 
+/// Stage names and one-liners when the bird is the companion. Same stages and
+/// thresholds as the tree, so switching never loses progress.
+const List<PlantStage> kBirdStages = [
+  PlantStage(0, 'Egg', 'Warm and waiting for your first win.', 0),
+  PlantStage(1, 'Hatchling', 'A tiny beak pokes out — you showed up.', 40),
+  PlantStage(2, 'Chick', 'Fluffy and curious, learning to chirp.', 150),
+  PlantStage(3, 'Fledgling', 'Feathers coming in, wings testing the air.', 400),
+  PlantStage(4, 'Young bird', 'Bright and bold — hopping branch to branch.', 800),
+  PlantStage(5, 'Songbird', 'Singing every morning because of your effort.', 1400),
+  PlantStage(6, 'Soaring bird', 'Wings wide, riding the wind you created.', 2400),
+];
+
+/// The stage as the chosen companion ('tree' or 'bird') names it.
+PlantStage companionStage(String companion, int index) {
+  final list = companion == 'bird' ? kBirdStages : kPlantStages;
+  final i = index < 0 ? 0 : (index >= list.length ? list.length - 1 : index);
+  return list[i];
+}
+
 /// One axis of the balance wheel.
 class WheelAxis {
   final String key;
@@ -109,6 +128,9 @@ class GrowthSnapshot {
 
   /// Day-keys where the plant moved up a stage, for markers on the curve.
   final Map<String, int> stageUps;
+
+  /// The same days as [daily], with everything that happened on each.
+  final List<DayFacts> recent;
   const GrowthSnapshot({
     required this.points,
     required this.stage,
@@ -121,6 +143,7 @@ class GrowthSnapshot {
     required this.dailyDays,
     required this.smooth,
     required this.stageUps,
+    required this.recent,
   });
 
   /// The weakest tracked axis — what to tend next.
@@ -131,6 +154,26 @@ class GrowthSnapshot {
       if (out == null || a.value < out.value) out = a;
     }
     return out;
+  }
+
+  /// 0..1 per day for one wheel axis over the last seven days (oldest first),
+  /// or empty when that axis has no per-day data (Money).
+  List<double> axisDaily(String key) {
+    final week = recent.length <= 7 ? recent : recent.sublist(recent.length - 7);
+    switch (key) {
+      case 'habits':
+        return [for (final f in week) f.habitsFrac];
+      case 'priorities':
+        return [for (final f in week) f.tasksFrac];
+      case 'mind':
+        return [for (final f in week) f.mindFrac];
+      case 'body':
+        return [for (final f in week) f.bodyFrac];
+      case 'connect':
+        return [for (final f in week) f.contacted ? 1.0 : 0.0];
+      default:
+        return const <double>[];
+    }
   }
 
   WheelAxis? get strongest {
@@ -248,6 +291,7 @@ class GrowthEngine {
       dailyDays: [for (final f in recent) f.day],
       smooth: smooth,
       stageUps: stageUps,
+      recent: recent,
     );
   }
 
