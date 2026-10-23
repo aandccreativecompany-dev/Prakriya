@@ -10,13 +10,17 @@ import android.content.SharedPreferences
 import android.content.res.Configuration
 import android.graphics.Color
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.util.TypedValue
 import android.view.View
 import android.widget.RemoteViews
 import es.antonborri.home_widget.HomeWidgetPlugin
 import es.antonborri.home_widget.HomeWidgetProvider
+import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -37,6 +41,7 @@ class HabitsWidgetProvider : HomeWidgetProvider() {
     companion object {
         const val ACTION_TOGGLE = "ai.aandccreative.prakriya.WIDGET_TOGGLE"
         const val ACTION_LAUNCH = "es.antonborri.home_widget.action.LAUNCH"
+        const val ACTION_NEW_DAY = "ai.aandccreative.prakriya.WIDGET_NEW_DAY"
     }
 
     private class Palette(
@@ -100,34 +105,73 @@ class HabitsWidgetProvider : HomeWidgetProvider() {
     }
 
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action == ACTION_TOGGLE) {
-            handleAction(context, intent)
-            return
+        when (intent.action) {
+            ACTION_TOGGLE -> {
+                handleAction(context, intent)
+                return
+            }
+            // The clock, date or zone changed, the phone restarted, or the
+            // app was updated: redraw straight away (this also rolls the data
+            // over to the new day) and set the next midnight alarm again.
+            ACTION_NEW_DAY,
+            Intent.ACTION_DATE_CHANGED,
+            Intent.ACTION_TIME_CHANGED,
+            Intent.ACTION_TIMEZONE_CHANGED,
+            Intent.ACTION_BOOT_COMPLETED,
+            Intent.ACTION_MY_PACKAGE_REPLACED -> {
+                try {
+                    refreshAll(context)
+                } catch (e: Exception) {
+                    // Never let a refresh problem crash a broadcast.
+                }
+                scheduleMidnight(context)
+                return
+            }
         }
         super.onReceive(context, intent)
     }
 
-    /** A soft refresh just after midnight so the widget shows the new day. */
+    override fun onEnabled(context: Context) {
+        super.onEnabled(context)
+        scheduleMidnight(context)
+    }
+
+    /**
+     * Wakes the phone a minute after midnight to show the new day. Inexact
+     * (so it needs no special permission) but allowed while the phone is
+     * dozing; the date-changed broadcast and the 30-minute system refresh
+     * are the backups.
+     */
     private fun scheduleMidnight(context: Context) {
         try {
             val alarms = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
             val at = Calendar.getInstance()
             at.add(Calendar.DAY_OF_YEAR, 1)
             at.set(Calendar.HOUR_OF_DAY, 0)
-            at.set(Calendar.MINUTE, 1)
-            at.set(Calendar.SECOND, 0)
+            at.set(Calendar.MINUTE, 0)
+            at.set(Calendar.SECOND, 5)
             at.set(Calendar.MILLISECOND, 0)
-            val ids = AppWidgetManager.getInstance(context)
-                .getAppWidgetIds(ComponentName(context, HabitsWidgetProvider::class.java))
             val intent = Intent(context, HabitsWidgetProvider::class.java)
-            intent.action = AppWidgetManager.ACTION_APPWIDGET_UPDATE
-            intent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids)
+            intent.action = ACTION_NEW_DAY
             val pending = PendingIntent.getBroadcast(
                 context, 7, intent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-            alarms.set(AlarmManager.RTC, at.timeInMillis, pending)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at.timeInMillis, pending)
+            } else {
+                alarms.set(AlarmManager.RTC_WAKEUP, at.timeInMillis, pending)
+            }
         } catch (e: Exception) {
-            // The 30-minute system refresh still covers this.
+            // The date-changed broadcast and 30-minute refresh still cover this.
+        }
+    }
+
+    /** Today's date, worked out on the phone so it can never be a day stale. */
+    private fun todayLabel(): String {
+        return try {
+            SimpleDateFormat("EEEE, d MMM", Locale.ENGLISH).format(Date())
+        } catch (e: Exception) {
+            ""
         }
     }
 
@@ -403,7 +447,7 @@ class HabitsWidgetProvider : HomeWidgetProvider() {
         views.setTextViewText(R.id.widget_title, title)
         views.setTextColor(R.id.widget_title, titleColor)
         views.setTextViewTextSize(R.id.widget_title, TypedValue.COMPLEX_UNIT_SP, 15f * scale)
-        val dateLabel = str(data, "widget_date", "")
+        val dateLabel = todayLabel().ifEmpty { str(data, "widget_date", "") }
         if (showDate && dateLabel.isNotEmpty()) {
             views.setTextViewText(R.id.widget_date, dateLabel)
             views.setTextColor(R.id.widget_date, p.muted)

@@ -4,10 +4,14 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../models.dart';
 import '../services/auth_service.dart';
+import '../services/extras.dart';
+import '../services/growth.dart';
 import '../store.dart';
 import '../theme.dart';
 import '../widgets/boosters.dart';
 import '../widgets/common.dart';
+import '../widgets/growth_plant.dart';
+import 'growth_screen.dart';
 import 'reminders_screen.dart';
 import 'about_screen.dart';
 import 'quote_screen.dart';
@@ -34,6 +38,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
   // card on every dashboard visit. Shrinking it here once the animation
   // reports itself done keeps the space only while it's actually in use.
   bool _mascotDone = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) maybeCelebratePlant(context);
+    });
+  }
 
   String _greeting() {
     final hour = DateTime.now().hour;
@@ -195,6 +207,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         MaterialPageRoute(builder: (_) => const RemindersScreen())),
                   ),
                   const WeeklyRecapCard(),
+                  const SizedBox(height: 14),
+                  const _GrowthCard(),
                   const SizedBox(height: 22),
                   Text('YOUR SECTIONS', style: label(Surfaces.muted(dark))),
                   const SizedBox(height: 10),
@@ -490,6 +504,73 @@ class _SectionTile extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Compact view of the growth plant; tapping opens the full "My Growth" screen.
+class _GrowthCard extends StatelessWidget {
+  const _GrowthCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return ListenableBuilder(
+      listenable: Listenable.merge([store, extras]),
+      builder: (context, _) {
+        final snap = GrowthEngine.current();
+        final weak = snap.weakest;
+        return GestureDetector(
+          onTap: () => Navigator.of(context)
+              .push(MaterialPageRoute(builder: (_) => const GrowthScreen())),
+          child: ModuleCard(
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              children: [
+                GrowthPlant(
+                    stage: snap.stage.index,
+                    thirsty: snap.thirsty,
+                    height: 86,
+                    animate: false),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('YOUR PLANT', style: label(Surfaces.eyebrow(dark))),
+                      const SizedBox(height: 4),
+                      Text(snap.stage.name,
+                          style: display(18, Surfaces.heading(dark))),
+                      const SizedBox(height: 2),
+                      Text(
+                        snap.thirsty
+                            ? 'Thirsty — one small action perks it up'
+                            : weak != null && snap.activeDaysThisWeek > 0
+                                ? 'Tend ${weak.label.toLowerCase()} next'
+                                : 'Complete a task to start growing',
+                        style: body(12, Surfaces.muted(dark)),
+                      ),
+                      const SizedBox(height: 8),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: LinearProgressIndicator(
+                          value: snap.toNext,
+                          minHeight: 6,
+                          backgroundColor:
+                              Surfaces.accent(dark).withValues(alpha: 0.18),
+                          valueColor:
+                              AlwaysStoppedAnimation(Surfaces.accent(dark)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(Icons.chevron_right, color: Surfaces.muted(dark)),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }

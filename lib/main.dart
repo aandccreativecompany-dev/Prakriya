@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'models.dart' show dayKey;
 import 'notifications.dart';
 import 'screens/home_screen.dart';
 import 'screens/lock_screen.dart';
@@ -231,6 +232,8 @@ class _Root extends StatefulWidget {
 class _RootState extends State<_Root> with WidgetsBindingObserver {
   late bool _locked;
   DateTime? _pausedAt;
+  Timer? _midnightTimer;
+  String _lastDay = dayKey(DateTime.now());
 
   // A brief trip to the background — the system photo picker, the share
   // sheet, a permission dialog, pulling down the notification shade — all
@@ -248,10 +251,32 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
     // the background — otherwise a PIN that's never been challenged reads
     // as broken.
     _locked = store.hasPin && store.onboardingComplete;
+    _armMidnightTimer();
+  }
+
+  /// Fires just after local midnight while the app is running, so a screen
+  /// left open overnight (and the widget) switch to the new day on their own.
+  void _armMidnightTimer() {
+    _midnightTimer?.cancel();
+    final now = DateTime.now();
+    final next = DateTime(now.year, now.month, now.day + 1, 0, 0, 2);
+    _midnightTimer = Timer(next.difference(now), () {
+      _checkNewDay();
+      _armMidnightTimer();
+    });
+  }
+
+  void _checkNewDay() {
+    final today = dayKey(DateTime.now());
+    if (today == _lastDay) return;
+    _lastDay = today;
+    store.dayChanged();
+    unawaited(HomeWidgetService.instance.forceRefresh());
   }
 
   @override
   void dispose() {
+    _midnightTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -273,6 +298,9 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
     // natively; apply them as soon as the app is back in front.
     if (state == AppLifecycleState.resumed) {
       unawaited(HomeWidgetService.instance.syncFromWidget());
+      _armMidnightTimer();
+      _checkNewDay();
+      unawaited(HomeWidgetService.instance.forceRefresh());
     }
     if (!store.hasPin || !store.onboardingComplete) return;
     if (state == AppLifecycleState.paused) {

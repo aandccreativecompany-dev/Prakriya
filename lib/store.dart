@@ -8,6 +8,7 @@ import 'mantras.dart';
 import 'models.dart';
 import 'notifications.dart';
 import 'services/coach_chat_service.dart';
+import 'services/extras.dart';
 import 'services/update_checker.dart';
 import 'theme.dart' show AppThemePreset, setAccentId, setFontFamily, setFontScale;
 import 'tips.dart';
@@ -319,6 +320,16 @@ class Store extends ChangeNotifier {
   }
 
   String get mantraOfTheDay => mantraEntryOfTheDay.text;
+
+  /// Called when the calendar day changes while the app is open or when it
+  /// returns to the foreground: catches the mantra up and notifies listeners
+  /// so every screen — and the home-screen widget — redraws for the new day.
+  void dayChanged() {
+    try {
+      ensureMantraRotationCurrent();
+    } catch (_) {}
+    notifyListeners();
+  }
 
   /// Advances the mantra rotation exactly once per calendar day. Safe to
   /// call as often as you like (at startup, on every app resume) — it's a
@@ -1384,6 +1395,7 @@ class Store extends ChangeNotifier {
 
   Future<void> logContactNow(RelationshipContact contact) async {
     contact.lastContactAt = DateTime.now();
+    extras.logContactToday();
     await _commit();
   }
 

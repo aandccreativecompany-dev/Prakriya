@@ -39,6 +39,12 @@ class Extras extends ChangeNotifier {
   /// day key -> hours slept (the night leading into that day).
   final Map<String, double> sleep = <String, double>{};
 
+  /// Day keys on which the user marked someone as contacted (Connect).
+  final List<String> contactDays = <String>[];
+
+  /// Highest growth-plant stage whose celebration has already been shown.
+  int plantStageSeen = 0;
+
   /// day key -> meditation minutes completed that day.
   final Map<String, int> meditationMinutes = <String, int>{};
 
@@ -107,6 +113,12 @@ class Extras extends ChangeNotifier {
             });
           }
           _readIntMap(decoded['meditationMinutes'], meditationMinutes);
+          final cd = _readStringList(decoded['contactDays']);
+          contactDays
+            ..clear()
+            ..addAll(cd ?? const <String>[]);
+          final ps = decoded['plantStageSeen'];
+          if (ps is num) plantStageSeen = ps.toInt();
           entryNutrients.clear();
           final en = decoded['entryNutrients'];
           if (en is Map) {
@@ -251,6 +263,8 @@ class Extras extends ChangeNotifier {
           'water': water,
           'sleep': sleep,
           'meditationMinutes': meditationMinutes,
+          'contactDays': contactDays,
+          'plantStageSeen': plantStageSeen,
           'entryNutrients': entryNutrients,
           'calorieGoal': calorieGoal,
           'female': female,
@@ -492,6 +506,27 @@ class Extras extends ChangeNotifier {
     } else {
       sleep[todayKey] = hours;
     }
+    _changed();
+  }
+
+  // ---- Connect log / growth plant ----
+
+  bool contactedOn(DateTime day) => contactDays.contains(dayKey(day));
+
+  void logContactToday() {
+    final k = todayKey;
+    if (contactDays.contains(k)) return;
+    contactDays.add(k);
+    // Keep the log small: a year of days is plenty for the growth views.
+    if (contactDays.length > 400) {
+      contactDays.removeRange(0, contactDays.length - 400);
+    }
+    _changed();
+  }
+
+  void markPlantStageSeen(int stage) {
+    if (stage <= plantStageSeen) return;
+    plantStageSeen = stage;
     _changed();
   }
 
