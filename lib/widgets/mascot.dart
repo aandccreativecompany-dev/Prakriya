@@ -5,39 +5,37 @@ import 'package:flutter/material.dart';
 
 import '../theme.dart';
 
-/// Pip — the little bird who climbs the gold steps. The app's mascot: it
-/// matches the bird companion, and the same artwork is the launcher icon.
+/// The app's mark: the little stick-man climbing the gold steps — the same
+/// picture as the launcher icon.
 ///
-/// [PipPainter] draws the whole scene in a 1024 x 1024 design space, scaled to
-/// whatever square it is given. `t` runs 0..1: the steps rise one by one, Pip
-/// hops up them, lands on top, blinks, and the sparkles twinkle. At `t == 1`
-/// it is the finished, resting picture.
-class PipPainter extends CustomPainter {
+/// [ClimberPainter] draws the scene in a 1024 x 1024 design space (the icon's
+/// own coordinates), scaled to whatever square it is given. `t` runs 0..1:
+/// the steps rise one by one, the man walks up them with a real leg cycle,
+/// arms swinging, then throws his arms up on top while sparkles twinkle.
+/// At `t == 1` it is the finished, resting picture.
+class ClimberPainter extends CustomPainter {
   final double t;
   final bool glow;
-  const PipPainter(this.t, {this.glow = true});
+  const ClimberPainter(this.t, {this.glow = true});
 
-  static const _steps = <Rect>[
-    Rect.fromLTWH(150, 760, 190, 130),
-    Rect.fromLTWH(318, 650, 190, 240),
-    Rect.fromLTWH(486, 540, 190, 350),
-    Rect.fromLTWH(654, 430, 220, 460),
+  // Step tops / x-spans match assets/icon/icon.png.
+  static const _tops = <double>[826, 700, 573, 447];
+  static const _left = <double>[192, 352, 512, 672];
+  static const _w = 160.0;
+  static const _bottom = 952.0;
+  static const _colors = <Color>[
+    Color(0xFFB07D12),
+    Color(0xFFDEA51A),
+    Color(0xFFF2BA3E),
+    Color(0xFFFDE9A9),
   ];
-  static const _stepColors = <List<Color>>[
-    [Color(0xFFF6C453), Color(0xFFC98A12)],
-    [Color(0xFFF6C453), Color(0xFFC98A12)],
-    [Color(0xFFFFE08A), Color(0xFFE7A71E)],
-    [Color(0xFFFFF1C4), Color(0xFFF6CB5E)],
-  ];
-  static const _r = 112.0; // Pip's body radius
+  static const _skin = Color(0xFFFFF6E3);
+
+  static const _thigh = 96.0, _shin = 96.0, _torso = 118.0, _head = 36.0;
+  static const _stroke = 30.0;
 
   double _seg(double a, double b) => ((t - a) / (b - a)).clamp(0.0, 1.0);
-
-  /// Where Pip's body centre rests on step [i].
-  Offset _perch(int i) {
-    final r = _steps[i];
-    return Offset(r.center.dx, r.top - _r + 14);
-  }
+  double _cx(int i) => _left[i] + _w / 2;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -46,60 +44,136 @@ class PipPainter extends CustomPainter {
     canvas.translate((size.width - 1024 * s) / 2, (size.height - 1024 * s) / 2);
     canvas.scale(s);
 
-    // Soft sun glow behind the top step.
     if (glow) {
       final g = Paint()
-        ..shader = ui.Gradient.radial(const Offset(760, 300), 330, [
-          const Color(0xFFFFD66B).withValues(alpha: 0.5 * _seg(0.1, 0.8)),
+        ..shader = ui.Gradient.radial(const Offset(760, 330), 360, [
+          const Color(0xFFFFD66B).withValues(alpha: 0.38 * _seg(0.1, 0.85)),
           const Color(0xFFFFD66B).withValues(alpha: 0),
         ]);
-      canvas.drawCircle(const Offset(760, 300), 330, g);
+      canvas.drawCircle(const Offset(760, 330), 360, g);
     }
 
-    // Twinkling sparkles.
     final tw = t * 2 * math.pi * 2;
-    _star(canvas, 250, 300, 34, 0.55 + 0.35 * math.sin(tw), _seg(0.3, 0.6));
-    _star(canvas, 150, 500, 22, 0.45 + 0.3 * math.sin(tw + 1.6), _seg(0.35, 0.65));
-    _star(canvas, 560, 230, 26, 0.5 + 0.3 * math.sin(tw + 3.1), _seg(0.4, 0.7));
-    _star(canvas, 900, 160, 20, 0.45 + 0.3 * math.sin(tw + 4.5), _seg(0.45, 0.75));
+    _star(canvas, 330, 250, 34, 0.55 + 0.35 * math.sin(tw), _seg(0.35, 0.6));
+    _star(canvas, 180, 520, 22, 0.45 + 0.3 * math.sin(tw + 1.6), _seg(0.4, 0.65));
+    _star(canvas, 520, 170, 26, 0.5 + 0.3 * math.sin(tw + 3.1), _seg(0.45, 0.7));
+    _star(canvas, 900, 150, 22, 0.45 + 0.3 * math.sin(tw + 4.5), _seg(0.5, 0.75));
 
-    // The steps rise one after another.
-    for (var i = 0; i < _steps.length; i++) {
-      final p = Curves.easeOutBack.transform(_seg(0.02 + i * 0.07, 0.24 + i * 0.07));
-      final r = _steps[i];
-      final h = r.height * p;
+    // Steps rise one after another.
+    for (var i = 0; i < 4; i++) {
+      final p = Curves.easeOutCubic.transform(_seg(0.02 + i * 0.06, 0.22 + i * 0.06));
+      final full = _bottom - _tops[i];
+      final h = full * p;
       if (h <= 0) continue;
-      final rr = RRect.fromRectAndRadius(
-          Rect.fromLTWH(r.left, r.bottom - h, r.width, h), const Radius.circular(30));
-      final paint = Paint()
-        ..shader = ui.Gradient.linear(Offset(0, r.top), Offset(0, r.bottom), _stepColors[i]);
-      canvas.drawRRect(rr, paint);
+      canvas.drawRect(Rect.fromLTWH(_left[i], _bottom - h, _w, h), Paint()..color = _colors[i]);
     }
 
-    // Pip: pops in on the first step, hops up, lands, blinks.
-    final appear = Curves.easeOutBack.transform(_seg(0.22, 0.36));
-    if (appear > 0) {
-      var pos = _perch(0);
-      var squash = 0.0;
-      for (var k = 0; k < 3; k++) {
-        final a = 0.38 + k * 0.15, b = a + 0.13;
-        final p = _seg(a, b);
-        if (t >= a) {
-          final from = _perch(k), to = _perch(k + 1);
-          final e = Curves.easeInOut.transform(p);
-          pos = Offset.lerp(from, to, e)!;
-          pos = pos.translate(0, -math.sin(p * math.pi) * 120);
-          if (p > 0 && p < 1) squash = -0.06 * math.sin(p * math.pi); // stretch in the air
-        }
-      }
-      // little landing squash after the last hop
-      final land = _seg(0.83, 0.95);
-      if (land > 0 && land < 1) squash = 0.07 * math.sin(land * math.pi);
-      final blink = _seg(0.9, 0.96);
-      final eyeOpen = blink > 0 && blink < 1 ? (1 - math.sin(blink * math.pi)).clamp(0.1, 1.0) : 1.0;
-      _pip(canvas, pos, appear, squash, eyeOpen);
-    }
+    final appear = _seg(0.2, 0.3);
+    if (appear > 0) _man(canvas, appear);
     canvas.restore();
+  }
+
+  // ---- the man -----------------------------------------------------------
+
+  Offset _lerp(Offset a, Offset b, double k) => Offset.lerp(a, b, k)!;
+
+  /// Two-bone leg: hip -> knee -> foot, knee bending toward +x (forward).
+  List<Offset> _leg(Offset hip, Offset foot) {
+    var d = foot - hip;
+    final reach = (_thigh + _shin) * 0.985;
+    if (d.distance > reach) d = d / d.distance * reach;
+    final f = hip + d;
+    final L = d.distance;
+    final a = (_thigh * _thigh - _shin * _shin + L * L) / (2 * L);
+    final h = math.sqrt(math.max(0, _thigh * _thigh - a * a));
+    final dir = d / L;
+    final perp = Offset(-dir.dy, dir.dx); // rotate 90°
+    var knee = hip + dir * a + perp * h;
+    final knee2 = hip + dir * a - perp * h;
+    if (knee2.dx > knee.dx) knee = knee2; // knee points forward
+    return [hip, knee, f];
+  }
+
+  void _man(Canvas c, double appear) {
+    final standY = _thigh + _shin - 14; // hip height above the step top
+    // current climb: 0..2, progress p of that climb
+    const t0 = 0.34, per = 0.15;
+    var k = 0;
+    var p = 0.0;
+    if (t >= t0) {
+      k = ((t - t0) / per).floor().clamp(0, 3);
+      p = k >= 3 ? 1.0 : ((t - t0 - k * per) / per).clamp(0.0, 1.0);
+      if (k >= 3) k = 2;
+    }
+    final from = k, to = k + 1;
+    final e = Curves.easeInOutCubic.transform(p);
+
+    final hipA = Offset(_cx(from), _tops[from] - standY);
+    final hipB = Offset(_cx(to), _tops[to] - standY);
+    var hip = _lerp(hipA, hipB, e);
+    // a small bob: dip as the lead foot lands, rise on the push
+    hip = hip.translate(0, 10 * math.sin(p * math.pi * 2));
+
+    // Lead foot swings up to the next step first, trailing foot follows.
+    Offset foot(Offset a, Offset b, double lo, double hi) {
+      final q = ((p - lo) / (hi - lo)).clamp(0.0, 1.0);
+      final eq = Curves.easeInOut.transform(q);
+      final pos = _lerp(a, b, eq);
+      return pos.translate(0, -math.sin(q * math.pi) * 46);
+    }
+
+    final leadA = Offset(_cx(from) + 22, _tops[from]);
+    final leadB = Offset(_cx(to) - 18, _tops[to]);
+    final trailA = Offset(_cx(from) - 26, _tops[from]);
+    final trailB = Offset(_cx(to) + 24, _tops[to]);
+    final lead = foot(leadA, leadB, 0.0, 0.6);
+    final trail = foot(trailA, trailB, 0.4, 1.0);
+
+    final top = t >= t0 + 3 * per; // arrived
+    final cheer = Curves.easeOutBack.transform(_seg(t0 + 3 * per, t0 + 3 * per + 0.12));
+
+    final lean = top ? 0.0 : 0.16;
+    final neck = hip + Offset(math.sin(lean) * _torso, -math.cos(lean) * _torso);
+    final headC = neck + Offset(math.sin(lean) * 40, -math.cos(lean) * 40);
+
+    final legs = [_leg(hip, lead), _leg(hip, trail)];
+
+    // arms: swing in opposition to the legs, then up in a cheer
+    final sh = neck.translate(0, 14);
+    final swing = math.sin(p * math.pi * 2) * 0.8;
+    double armAngle(int side) {
+      final walking = (side == 0 ? swing : -swing) + 0.35;
+      return top ? ui.lerpDouble(walking, side == 0 ? 2.6 : 3.7, cheer)! : walking;
+    }
+
+    Offset hand(int side) {
+      final a = armAngle(side);
+      return sh + Offset(math.sin(a) * 92, math.cos(a) * 92);
+    }
+
+    final paint = Paint()
+      ..color = _skin.withValues(alpha: appear)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = _stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    final fill = Paint()..color = _skin.withValues(alpha: appear);
+
+    // back arm, back leg first, then torso/front limbs
+    c.drawLine(sh, hand(1), paint);
+    c.drawPath(_poly(legs[1]), paint);
+    c.drawLine(hip, neck, paint);
+    c.drawPath(_poly(legs[0]), paint);
+    c.drawLine(sh, hand(0), paint);
+    c.drawCircle(headC, _head, fill);
+  }
+
+  Path _poly(List<Offset> pts) {
+    final p = Path()..moveTo(pts[0].dx, pts[0].dy);
+    for (final o in pts.skip(1)) {
+      p.lineTo(o.dx, o.dy);
+    }
+    return p;
   }
 
   void _star(Canvas c, double cx, double cy, double r, double opacity, double grow) {
@@ -115,65 +189,14 @@ class PipPainter extends CustomPainter {
     c.drawPath(path, Paint()..color = const Color(0xFFFFE9A8).withValues(alpha: opacity.clamp(0.0, 1.0)));
   }
 
-  void _pip(Canvas c, Offset center, double scale, double squash, double eyeOpen) {
-    c.save();
-    c.translate(center.dx, center.dy);
-    c.scale(scale * (1 + squash), scale * (1 - squash));
-    // body
-    c.drawCircle(
-      Offset.zero,
-      _r,
-      Paint()
-        ..shader = ui.Gradient.linear(const Offset(0, -_r), const Offset(0, _r),
-            const [Color(0xFFFFFFFF), Color(0xFFFFE9C7)]),
-    );
-    // head tuft
-    c.drawPath(
-      Path()
-        ..moveTo(-8, -106)
-        ..relativeQuadraticBezierTo(-6, -34, 16, -40)
-        ..relativeQuadraticBezierTo(-2, 22, 14, 30)
-        ..close(),
-      Paint()..color = const Color(0xFFFFD66B),
-    );
-    // wing
-    c.drawPath(
-      Path()
-        ..moveTo(-96, -12)
-        ..relativeQuadraticBezierTo(-30, 40, 4, 74)
-        ..relativeQuadraticBezierTo(36, -12, 40, -48)
-        ..close(),
-      Paint()..color = const Color(0xFFFBD9A0),
-    );
-    // beak
-    c.drawPath(
-      Path()
-        ..moveTo(92, -10)
-        ..relativeLineTo(46, 14)
-        ..relativeLineTo(-46, 22)
-        ..close(),
-      Paint()..color = const Color(0xFFF4A62A),
-    );
-    // cheek
-    c.drawCircle(const Offset(62, 12), 13, Paint()..color = const Color(0x99FFB7A5));
-    // eye (blinks by squashing vertically)
-    c.save();
-    c.translate(40, -26);
-    c.scale(1, eyeOpen);
-    c.drawCircle(Offset.zero, 13, Paint()..color = const Color(0xFF2B1A57));
-    c.drawCircle(const Offset(5, -5), 4.5, Paint()..color = Colors.white);
-    c.restore();
-    c.restore();
-  }
-
   @override
-  bool shouldRepaint(covariant PipPainter old) => old.t != t || old.glow != glow;
+  bool shouldRepaint(covariant ClimberPainter old) => old.t != t || old.glow != glow;
 }
 
-/// Static, resting Pip — for headers, the welcome step, empty states.
-class PipMark extends StatelessWidget {
+/// Static, resting mark — for headers, the welcome step, empty states.
+class ClimberMark extends StatelessWidget {
   final double size;
-  const PipMark({super.key, this.size = 120});
+  const ClimberMark({super.key, this.size = 120});
 
   @override
   Widget build(BuildContext context) {
@@ -181,13 +204,13 @@ class PipMark extends StatelessWidget {
       child: SizedBox(
         width: size,
         height: size,
-        child: const CustomPaint(painter: PipPainter(1.0)),
+        child: const CustomPaint(painter: ClimberPainter(1.0)),
       ),
     );
   }
 }
 
-/// The opening screen: Pip climbs the steps, the name fades in, then the
+/// The opening screen: The stick-man climbs the steps, the name fades in, then the
 /// whole thing fades out over the app (which is already built underneath, so
 /// there is no extra wait). Tap to skip; skipped entirely when the phone has
 /// animations turned off.
@@ -207,7 +230,7 @@ class _MascotIntroState extends State<MascotIntro> with SingleTickerProviderStat
   @override
   void initState() {
     super.initState();
-    _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 2300));
+    _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 2600));
   }
 
   @override
@@ -277,7 +300,7 @@ class _MascotIntroState extends State<MascotIntro> with SingleTickerProviderStat
                             child: SizedBox(
                               width: 260,
                               height: 260,
-                              child: CustomPaint(painter: PipPainter(t, glow: true)),
+                              child: CustomPaint(painter: ClimberPainter(t, glow: true)),
                             ),
                           ),
                           const SizedBox(height: 18),
@@ -296,7 +319,7 @@ class _MascotIntroState extends State<MascotIntro> with SingleTickerProviderStat
                                         decoration: TextDecoration.none,
                                       )),
                                   SizedBox(height: 6),
-                                  Text('one small step, every day',
+                                  Text('one small step at a time',
                                       style: TextStyle(
                                         color: Brand.goldPale,
                                         fontSize: 13.5,

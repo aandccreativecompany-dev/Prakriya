@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show HapticFeedback;
 
 import '../models.dart';
 import '../screens/settings_screen.dart';
@@ -232,7 +233,7 @@ class ModuleCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
-    return Container(
+    return FadeSlideIn(child: Container(
       width: double.infinity,
       padding: padding,
       decoration: BoxDecoration(
@@ -254,7 +255,7 @@ class ModuleCard extends StatelessWidget {
           child,
         ],
       ),
-    );
+    ));
   }
 }
 
@@ -267,7 +268,8 @@ class GoldButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
-    return SizedBox(
+    return PressScale(
+      child: SizedBox(
       width: double.infinity,
       child: FilledButton(
         onPressed: onPressed,
@@ -280,7 +282,7 @@ class GoldButton extends StatelessWidget {
         ),
         child: Text(labelText),
       ),
-    );
+    ));
   }
 }
 
@@ -301,9 +303,14 @@ class CheckSquare extends StatelessWidget {
     final dark = Theme.of(context).brightness == Brightness.dark;
     final accent = Surfaces.accent(dark);
     return InkWell(
-      onTap: onTap,
+      onTap: () {
+        HapticFeedback.selectionClick();
+        onTap();
+      },
       borderRadius: BorderRadius.circular(8),
-      child: Container(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
         width: size,
         height: size,
         decoration: BoxDecoration(
@@ -313,9 +320,46 @@ class CheckSquare extends StatelessWidget {
               width: 1.5),
           borderRadius: BorderRadius.circular(7),
         ),
-        child: checked
-            ? Icon(Icons.check, size: size * 0.62, color: Brand.deep)
-            : null,
+        // The tick pops in with a little overshoot.
+        child: AnimatedScale(
+          scale: checked ? 1 : 0,
+          duration: const Duration(milliseconds: 260),
+          curve: Curves.easeOutBack,
+          child: Icon(Icons.check, size: size * 0.62, color: Brand.deep),
+        ),
+      ),
+    );
+  }
+}
+
+/// Gives any tappable child a soft press-down "squish" — used on buttons so
+/// every tap has a little physical feedback.
+class PressScale extends StatefulWidget {
+  final Widget child;
+  const PressScale({super.key, required this.child});
+
+  @override
+  State<PressScale> createState() => _PressScaleState();
+}
+
+class _PressScaleState extends State<PressScale> {
+  bool _down = false;
+
+  void _set(bool v) {
+    if (_down != v) setState(() => _down = v);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Listener(
+      onPointerDown: (_) => _set(true),
+      onPointerUp: (_) => _set(false),
+      onPointerCancel: (_) => _set(false),
+      child: AnimatedScale(
+        scale: _down ? 0.96 : 1,
+        duration: const Duration(milliseconds: 110),
+        curve: Curves.easeOut,
+        child: widget.child,
       ),
     );
   }

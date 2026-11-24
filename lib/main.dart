@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show PointerDeviceKind;
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
@@ -213,6 +214,7 @@ class PrakriyaApp extends StatelessWidget {
           theme: buildTheme(Brightness.light),
           darkTheme: buildTheme(Brightness.dark),
           themeMode: store.themeMode,
+          scrollBehavior: const _SmoothScroll(),
           // `home` stays the same const instance across rebuilds — its own
           // AnimatedBuilder below is what actually swaps onboarding for home,
           // so we're not relying on MaterialApp's Navigator ever re-generating
@@ -222,6 +224,22 @@ class PrakriyaApp extends StatelessWidget {
       },
     );
   }
+}
+
+/// App-wide scrolling: soft, bouncy overscroll on every list, and mouse /
+/// trackpad dragging so it also feels right on tablets and desktop builds.
+class _SmoothScroll extends MaterialScrollBehavior {
+  const _SmoothScroll();
+  @override
+  ScrollPhysics getScrollPhysics(BuildContext context) =>
+      const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics());
+  @override
+  Set<PointerDeviceKind> get dragDevices => {
+        PointerDeviceKind.touch,
+        PointerDeviceKind.mouse,
+        PointerDeviceKind.trackpad,
+        PointerDeviceKind.stylus,
+      };
 }
 
 /// Swaps between onboarding, an app-wide PIN/biometric relock, and the home

@@ -294,6 +294,10 @@ ThemeData buildTheme(Brightness brightness) {
     colorScheme: scheme,
     scaffoldBackgroundColor: dark ? Brand.deep : Brand.cream,
     splashFactory: InkSparkle.splashFactory,
+    pageTransitionsTheme: const PageTransitionsTheme(builders: {
+      TargetPlatform.android: FadeForwardsPageTransitionsBuilder(),
+      TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+    }),
     textTheme: GoogleFonts.interTextTheme(
         brightness == Brightness.dark ? ThemeData.dark().textTheme : null),
   );

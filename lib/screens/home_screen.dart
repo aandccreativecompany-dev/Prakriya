@@ -5,6 +5,7 @@ import '../models.dart';
 import '../services/home_widget_service.dart';
 import '../store.dart';
 import '../theme.dart';
+import '../widgets/scroll_top.dart';
 import '../widgets/boosters.dart';
 import '../widgets/common.dart';
 import 'dashboard_screen.dart';
@@ -92,6 +93,7 @@ class HomeScreen extends StatefulWidget {
 /// away, just not competing for space with Dashboard/Tasks/Outcome/Finance.
 class _HomeScreenState extends State<HomeScreen> {
   int _tabIndex = 0;
+  int _slideDir = 1; // +1 when moving to a tab on the right, -1 to the left
 
   @override
   void initState() {
@@ -315,13 +317,28 @@ class _HomeScreenState extends State<HomeScreen> {
         return Scaffold(
           body: tabs.isEmpty
               ? const SizedBox.shrink()
-              : AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 220),
-                  switchInCurve: Curves.easeOut,
-                  switchOutCurve: Curves.easeIn,
-                  transitionBuilder: (child, animation) =>
-                      FadeTransition(opacity: animation, child: child),
-                  child: KeyedSubtree(key: ValueKey(safeIndex), child: tabs[safeIndex]),
+              : ScrollTopOverlay(
+                  margin: const EdgeInsets.only(right: 16, bottom: 14),
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 280),
+                    switchInCurve: Curves.easeOutCubic,
+                    switchOutCurve: Curves.easeInCubic,
+                    transitionBuilder: (child, animation) {
+                      // Slide a little in the direction of travel, and fade.
+                      final incoming = child.key == ValueKey(safeIndex);
+                      final dir = _slideDir.toDouble();
+                      final offset = Tween<Offset>(
+                        begin: Offset((incoming ? dir : -dir) * 0.05, 0),
+                        end: Offset.zero,
+                      ).animate(animation);
+                      return FadeTransition(
+                        opacity: animation,
+                        child: SlideTransition(position: offset, child: child),
+                      );
+                    },
+                    child: KeyedSubtree(
+                        key: ValueKey(safeIndex), child: tabs[safeIndex]),
+                  ),
                 ),
           bottomNavigationBar: navItems.length > 1
               ? SafeArea(
@@ -329,7 +346,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: _ScrollableNavBar(
                     selectedIndex: safeIndex,
                     items: navItems,
-                    onSelected: (i) => setState(() => _tabIndex = i),
+                    onSelected: (i) => setState(() {
+                      _slideDir = i >= _tabIndex ? 1 : -1;
+                      _tabIndex = i;
+                    }),
                   ),
                 )
               : null,

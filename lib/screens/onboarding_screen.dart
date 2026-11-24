@@ -184,7 +184,7 @@ class _WelcomeStep extends StatelessWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const PipMark(size: 150),
+                  const ClimberMark(size: 150),
                   const SizedBox(height: 14),
                   Text('PRAKRIYĀ',
                       style: display(30, Surfaces.heading(dark))
