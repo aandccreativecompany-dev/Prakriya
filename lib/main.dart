@@ -118,7 +118,11 @@ Future<void> main() async {
         // signed-in user (Firebase remembers sign-in across launches), so
         // it must never blindly overwrite real on-device data with an
         // older cloud snapshot.
-        if (user != null) CloudSync.instance.pullIfFreshInstall(user.uid);
+        if (user != null) {
+          CloudSync.instance.pullIfFreshInstall(user.uid);
+        } else {
+          CloudSync.instance.stopListening();
+        }
       });
     } catch (_) {
       // No google-services.json in this build — app still works fully offline.

@@ -617,7 +617,8 @@ class _SignInStepState extends State<_SignInStep> {
           Text(
             "One last step — sign in with Google to finish setting up Prakriyā. "
             'Everything you enter — habits, priorities, journal, wallet — backs up '
-            "automatically to your account, so a new phone or reinstall never loses it.",
+            "automatically to your account, so a new phone or reinstall never loses it. "
+            'It also stays in sync with the Prakriyā web app.',
             style: body(13, Surfaces.muted(dark)).copyWith(height: 1.5),
           ),
           const Spacer(),

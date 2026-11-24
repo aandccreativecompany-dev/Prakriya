@@ -56,6 +56,35 @@ class AuthService {
     }
   }
 
+  /// Optional Drive backup only. `drive.file` lets Prakriyā touch just the one
+  /// backup file it creates in the user's Drive — nothing else. Asked for only
+  /// when the user taps "Back up to Google Drive". Silent when already granted;
+  /// with [interactive] it shows Google's consent sheet. Returns null if
+  /// unavailable or not granted.
+  static const driveScope = 'https://www.googleapis.com/auth/drive.file';
+
+  Future<String?> driveToken({bool interactive = false}) async {
+    if (!isAvailable || !isSignedIn) return null;
+    try {
+      await _ensureInitialized();
+      final client = GoogleSignIn.instance.authorizationClient;
+      var auth = await client.authorizationForScopes([driveScope]);
+      if (auth == null && interactive) {
+        auth = await client.authorizeScopes([driveScope]);
+      }
+      return auth?.accessToken;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Drops a cached token Google rejected, so the next call fetches a fresh one.
+  Future<void> clearDriveToken(String token) async {
+    try {
+      await GoogleSignIn.instance.authorizationClient.clearAuthorizationToken(accessToken: token);
+    } catch (_) {}
+  }
+
   Future<void> signOut() async {
     final auth = _auth;
     if (auth == null) return;
