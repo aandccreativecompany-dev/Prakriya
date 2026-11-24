@@ -111,8 +111,6 @@ class _GrowthScreenState extends State<GrowthScreen> {
                     padding: const EdgeInsets.symmetric(horizontal: 20),
                     child: Column(
                       children: [
-                        const _CompanionPicker(),
-                        const SizedBox(height: 12),
                         RepaintBoundary(
                           key: _shareKey,
                           child: _PlantCard(snap: snap),
@@ -172,29 +170,6 @@ const _monthNames = [
 String _dateText(DateTime d) =>
     '${_dayNames[d.weekday - 1]}, ${d.day} ${_monthNames[d.month - 1]}';
 
-/// Tree or bird — progress is shared, so switching never loses anything.
-class _CompanionPicker extends StatelessWidget {
-  const _CompanionPicker();
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: double.infinity,
-      child: SegmentedButton<String>(
-        segments: const [
-          ButtonSegment<String>(
-              value: 'tree', label: Text('Tree'), icon: Icon(Icons.park_outlined)),
-          ButtonSegment<String>(
-              value: 'bird', label: Text('Bird'), icon: Icon(Icons.flutter_dash)),
-        ],
-        selected: {extras.companion},
-        showSelectedIcon: false,
-        onSelectionChanged: (v) => extras.setCompanion(v.first),
-      ),
-    );
-  }
-}
-
 class _PlantCard extends StatelessWidget {
   final GrowthSnapshot snap;
   const _PlantCard({required this.snap});
@@ -212,9 +187,11 @@ class _PlantCard extends StatelessWidget {
       child: Column(
         children: [
           Center(
-            child: GrowthCompanion(
+            child: AnimatedCompanion(
                 kind: kind, stage: snap.stage.index, idle: snap.thirsty),
           ),
+          const SizedBox(height: 8),
+          const Center(child: CompanionToggle()),
           const SizedBox(height: 6),
           Text(cs.name, style: display(22, Surfaces.heading(dark))),
           const SizedBox(height: 4),

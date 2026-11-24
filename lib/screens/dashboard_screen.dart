@@ -527,7 +527,7 @@ class _GrowthCard extends StatelessWidget {
             padding: const EdgeInsets.all(14),
             child: Row(
               children: [
-                GrowthCompanion(
+                AnimatedCompanion(
                     kind: extras.companion,
                     stage: snap.stage.index,
                     idle: snap.thirsty,
@@ -554,6 +554,8 @@ class _GrowthCard extends StatelessWidget {
                                 : 'Complete a task to start growing',
                         style: body(12, Surfaces.muted(dark)),
                       ),
+                      const SizedBox(height: 8),
+                      const CompanionToggle(),
                       const SizedBox(height: 8),
                       ClipRRect(
                         borderRadius: BorderRadius.circular(6),

@@ -1,6 +1,10 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import '../services/extras.dart';
+import '../theme.dart';
 
 /// The plant that grows with the user's progress. [stage] is 0 (seed) to 6
 /// (fruiting tree). When [thirsty] the leaves fade and droop a little — it
@@ -291,6 +295,121 @@ class GrowthCompanion extends StatelessWidget {
       return GrowthBird(stage: stage, sleepy: idle, height: height, animate: animate);
     }
     return GrowthPlant(stage: stage, thirsty: idle, height: height, animate: animate);
+  }
+}
+
+/// The companion with a smooth cross-fade when the person switches between the
+/// tree and the bird — no rebuild flash, and it works on every screen that
+/// shows the companion, because it simply follows `kind`.
+class AnimatedCompanion extends StatelessWidget {
+  final String kind;
+  final int stage;
+  final bool idle;
+  final double height;
+  final bool animate;
+  const AnimatedCompanion({
+    super.key,
+    required this.kind,
+    required this.stage,
+    this.idle = false,
+    this.height = 160,
+    this.animate = true,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: height,
+      height: height,
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 380),
+        switchInCurve: Curves.easeOutCubic,
+        switchOutCurve: Curves.easeInCubic,
+        transitionBuilder: (child, animation) => FadeTransition(
+          opacity: animation,
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.88, end: 1.0).animate(animation),
+            child: child,
+          ),
+        ),
+        child: KeyedSubtree(
+          key: ValueKey<String>(kind),
+          child: GrowthCompanion(
+              kind: kind, stage: stage, idle: idle, height: height, animate: animate),
+        ),
+      ),
+    );
+  }
+}
+
+/// A compact Tree | Bird switch that can sit right next to the companion
+/// (dashboard and My Growth), so switching never needs a trip to another
+/// screen. Changes apply instantly everywhere and are remembered.
+class CompanionToggle extends StatelessWidget {
+  const CompanionToggle({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final accent = Surfaces.accent(dark);
+    return ListenableBuilder(
+      listenable: extras,
+      builder: (context, _) {
+        Widget seg(String kind, IconData icon, String text) {
+          final on = extras.companion == kind;
+          return Semantics(
+            button: true,
+            selected: on,
+            label: text,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () {
+                if (on) return;
+                HapticFeedback.selectionClick();
+                extras.setCompanion(kind);
+              },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOut,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                decoration: BoxDecoration(
+                  color: on ? accent : Colors.transparent,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(icon, size: 15, color: on ? Colors.white : Surfaces.muted(dark)),
+                    const SizedBox(width: 5),
+                    Text(text,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: on ? Colors.white : Surfaces.muted(dark),
+                        )),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }
+
+        return Container(
+          padding: const EdgeInsets.all(3),
+          decoration: BoxDecoration(
+            color: accent.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(22),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              seg('tree', Icons.park_outlined, 'Tree'),
+              seg('bird', Icons.flutter_dash, 'Bird'),
+            ],
+          ),
+        );
+      },
+    );
   }
 }
 

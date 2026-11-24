@@ -16,6 +16,7 @@ import 'services/extras.dart';
 import 'services/home_widget_service.dart';
 import 'store.dart';
 import 'theme.dart';
+import 'widgets/mascot.dart';
 
 /// Users reported the app going blank after extended use. In a release
 /// build, Flutter's *default* response to an uncaught error escaping a
@@ -216,7 +217,7 @@ class PrakriyaApp extends StatelessWidget {
           // AnimatedBuilder below is what actually swaps onboarding for home,
           // so we're not relying on MaterialApp's Navigator ever re-generating
           // the initial route (it won't, once already pushed).
-          home: const _Root(),
+          home: const MascotIntro(child: _Root()),
         );
       },
     );

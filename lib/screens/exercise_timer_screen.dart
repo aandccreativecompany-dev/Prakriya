@@ -83,7 +83,7 @@ class _ExerciseTimerScreenState extends State<ExerciseTimerScreen> {
       // down and standing up a new one every interval, which is both
       // faster and avoids overlapping-playback glitches on a fast device.
       await _bellPlayer.stop();
-      await _bellPlayer.play(AssetSource('sound/bell.wav'), volume: 1.0);
+      await _bellPlayer.play(AssetSource('sound/bell.ogg'), volume: 1.0);
     } catch (_) {
       // Fall back to the old (best-effort, sometimes silent) system sound
       // rather than let a playback error interrupt the workout timer.
