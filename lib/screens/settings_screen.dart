@@ -227,6 +227,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     const ScreenHeader(
                       icon: Icons.settings_outlined,
                       title: 'Settings',
+                      showSettings: false,
                     ),
                     const SizedBox(height: 18),
                     Padding(

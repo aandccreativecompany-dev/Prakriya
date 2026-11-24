@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models.dart';
+import '../screens/settings_screen.dart';
 import '../theme.dart';
 
 /// Small "Saved." toast — a light, consistent confirmation after any quick
@@ -37,6 +38,9 @@ class ScreenHeader extends StatelessWidget {
   /// the Navigator — there's nothing to pop back to, so showing the arrow
   /// would just be a dead button.
   final bool showBackButton;
+  /// A settings gear in the top-right corner of every screen, so Settings is
+  /// always one tap away. Off only on Settings itself.
+  final bool showSettings;
   const ScreenHeader({
     super.key,
     required this.icon,
@@ -44,6 +48,7 @@ class ScreenHeader extends StatelessWidget {
     this.subtitle,
     this.actions,
     this.showBackButton = true,
+    this.showSettings = true,
   });
 
   @override
@@ -61,6 +66,13 @@ class ScreenHeader extends StatelessWidget {
               ),
             const Spacer(),
             if (actions != null) ...actions!,
+            if (showSettings)
+              IconButton(
+                tooltip: 'Settings',
+                onPressed: () => Navigator.of(context)
+                    .push(MaterialPageRoute(builder: (_) => const SettingsScreen())),
+                icon: Icon(Icons.settings_outlined, color: Surfaces.muted(dark)),
+              ),
           ],
         ),
         Padding(

@@ -22,23 +22,23 @@ class MeditationSound {
 
 const List<MeditationSound> kMeditationSounds = [
   MeditationSound('none', 'Silence', null, 'Custom', Icons.volume_off_outlined),
-  MeditationSound('rain', 'Rain', 'sound/med_rain.wav', 'Nature', Icons.grain),
-  MeditationSound('storm', 'Thunderstorm', 'sound/med_storm.wav', 'Nature', Icons.thunderstorm_outlined),
-  MeditationSound('ocean', 'Ocean', 'sound/med_ocean.wav', 'Nature', Icons.waves),
-  MeditationSound('stream', 'Stream', 'sound/med_stream.wav', 'Nature', Icons.water),
-  MeditationSound('forest', 'Forest night', 'sound/med_forest.wav', 'Nature', Icons.forest_outlined),
-  MeditationSound('birds', 'Birdsong', 'sound/med_birds.wav', 'Nature', Icons.flutter_dash),
-  MeditationSound('wind', 'Soft wind', 'sound/med_wind.wav', 'Nature', Icons.air),
-  MeditationSound('fire', 'Fireplace', 'sound/med_fire.wav', 'Nature', Icons.local_fire_department_outlined),
-  MeditationSound('drops', 'Water drops', 'sound/med_drops.wav', 'Nature', Icons.water_drop_outlined),
-  MeditationSound('bowl', 'Singing bowl', 'sound/med_bowl.wav', 'Tones', Icons.circle_outlined),
-  MeditationSound('temple', 'Temple bells', 'sound/med_temple.wav', 'Tones', Icons.notifications_none),
-  MeditationSound('chimes', 'Wind chimes', 'sound/med_chimes.wav', 'Tones', Icons.music_note_outlined),
-  MeditationSound('om', 'Om drone', 'sound/med_om.wav', 'Tones', Icons.self_improvement),
-  MeditationSound('pad', 'Calm pad', 'sound/med_pad.wav', 'Tones', Icons.piano_outlined),
-  MeditationSound('sleep', 'Deep sleep', 'sound/med_sleep.wav', 'Sleep & focus', Icons.bedtime_outlined),
-  MeditationSound('theta', 'Theta waves', 'sound/med_theta.wav', 'Sleep & focus', Icons.headphones_outlined),
-  MeditationSound('brown', 'Brown noise', 'sound/med_brown.wav', 'Sleep & focus', Icons.graphic_eq),
+  MeditationSound('rain', 'Rain', 'sound/med_rain.ogg', 'Nature', Icons.grain),
+  MeditationSound('storm', 'Thunderstorm', 'sound/med_storm.ogg', 'Nature', Icons.thunderstorm_outlined),
+  MeditationSound('ocean', 'Ocean', 'sound/med_ocean.ogg', 'Nature', Icons.waves),
+  MeditationSound('stream', 'Stream', 'sound/med_stream.ogg', 'Nature', Icons.water),
+  MeditationSound('forest', 'Forest night', 'sound/med_forest.ogg', 'Nature', Icons.forest_outlined),
+  MeditationSound('birds', 'Birdsong', 'sound/med_birds.ogg', 'Nature', Icons.flutter_dash),
+  MeditationSound('wind', 'Soft wind', 'sound/med_wind.ogg', 'Nature', Icons.air),
+  MeditationSound('fire', 'Fireplace', 'sound/med_fire.ogg', 'Nature', Icons.local_fire_department_outlined),
+  MeditationSound('drops', 'Water drops', 'sound/med_drops.ogg', 'Nature', Icons.water_drop_outlined),
+  MeditationSound('bowl', 'Singing bowl', 'sound/med_bowl.ogg', 'Tones', Icons.circle_outlined),
+  MeditationSound('temple', 'Temple bells', 'sound/med_temple.ogg', 'Tones', Icons.notifications_none),
+  MeditationSound('chimes', 'Wind chimes', 'sound/med_chimes.ogg', 'Tones', Icons.music_note_outlined),
+  MeditationSound('om', 'Om drone', 'sound/med_om.ogg', 'Tones', Icons.self_improvement),
+  MeditationSound('pad', 'Calm pad', 'sound/med_pad.ogg', 'Tones', Icons.piano_outlined),
+  MeditationSound('sleep', 'Deep sleep', 'sound/med_sleep.ogg', 'Sleep & focus', Icons.bedtime_outlined),
+  MeditationSound('theta', 'Theta waves', 'sound/med_theta.ogg', 'Sleep & focus', Icons.headphones_outlined),
+  MeditationSound('brown', 'Brown noise', 'sound/med_brown.ogg', 'Sleep & focus', Icons.graphic_eq),
   MeditationSound('link', 'My own link', null, 'Custom', Icons.link),
 ];
 
@@ -168,7 +168,7 @@ class MeditationSession extends ChangeNotifier {
   Future<void> _ring(double volume) async {
     try {
       await _bell.stop();
-      await _bell.play(AssetSource('sound/bell.wav'), volume: volume);
+      await _bell.play(AssetSource('sound/bell.ogg'), volume: volume);
     } catch (e) {
       debugPrint('Meditation bell failed: $e');
     }
