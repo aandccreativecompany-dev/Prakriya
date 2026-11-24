@@ -4,6 +4,7 @@ import '../models.dart';
 import '../services/auth_service.dart';
 import '../store.dart';
 import '../theme.dart';
+import '../widgets/mascot.dart';
 import '../widgets/common.dart';
 import 'module_picker_screen.dart';
 
@@ -183,8 +184,8 @@ class _WelcomeStep extends StatelessWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.wb_twilight, color: Surfaces.accent(dark), size: 64),
-                  const SizedBox(height: 24),
+                  const PipMark(size: 150),
+                  const SizedBox(height: 14),
                   Text('PRAKRIYĀ',
                       style: display(30, Surfaces.heading(dark))
                           .copyWith(letterSpacing: .5)),
