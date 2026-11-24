@@ -236,12 +236,17 @@ class _MascotIntroState extends State<MascotIntro> with SingleTickerProviderStat
 
   @override
   Widget build(BuildContext context) {
-    if (_gone) return widget.child;
+    // The child must stay at the same spot in the tree for the whole life of
+    // the widget — returning it bare once the intro ends would rebuild the
+    // entire app underneath (state lost, first-frame prompts shown twice).
     return Stack(
       fit: StackFit.expand,
       children: [
         widget.child,
-        AnimatedBuilder(
+        if (_gone)
+          const SizedBox.shrink()
+        else
+          AnimatedBuilder(
           animation: _c,
           builder: (context, _) {
             final t = _c.value;

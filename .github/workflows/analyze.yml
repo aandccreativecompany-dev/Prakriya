@@ -18,3 +18,4 @@ jobs:
       - run: flutter pub get
       # Errors fail the job; style hints don't.
       - run: flutter analyze --no-fatal-infos --no-fatal-warnings
+      - run: flutter test
